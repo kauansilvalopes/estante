@@ -337,6 +337,21 @@ void flush_range(void *address, std::size_t length) noexcept
 }
 } // namespace
 
+void Canvas::image(unsigned x,unsigned y,unsigned edge,const std::uint32_t* source) noexcept {
+    if(!source||!edge||x>=frame_width||y>=frame_height)return;
+    for(unsigned row=0;row<edge&&y+row<frame_height;row++)
+        for(unsigned col=0;col<edge&&x+col<frame_width;col++)
+            put_pixel_unchecked(pixels_,x+col,y+row,static_cast<Color>(source[row*edge+col]));
+}
+void Canvas::rounded_rectangle(unsigned x,unsigned y,unsigned width,unsigned height,unsigned radius,Color color) noexcept {
+    if(!width||!height)return;
+    if(radius>width/2)radius=width/2;if(radius>height/2)radius=height/2;
+    rectangle(x+radius,y,width-2*radius,height,color);
+    rectangle(x,y+radius,width,height-2*radius,color);
+    if(radius){circle(x+radius,y+radius,radius,color);circle(x+width-radius-1,y+radius,radius,color);
+    circle(x+radius,y+height-radius-1,radius,color);circle(x+width-radius-1,y+height-radius-1,radius,color);}
+}
+
 void Canvas::clear(Color color) noexcept
 {
     fill_rect(pixels_, 0, 0, frame_width, frame_height, color);

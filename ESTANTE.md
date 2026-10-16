@@ -5,7 +5,7 @@ Nao modifica as pastas do menu oficial: organiza colecoes dentro do Estante.
 Nao move, apaga nem reinstala jogos. PS2 portado como PS4 requer classificacao manual.
 
 ## Uso
-- Direcional: navegar; esquerda: colecoes; direita: titulos.
+- Direcional: navegar na grade; esquerda na primeira coluna ou circulo: colecoes; direita: titulos.
 - X: abrir colecao ou confirmar pedido de iniciar jogo.
 - Quadrado: selecionar varios titulos.
 - Triangulo / Options: organizar, classificar, criar pastas, favoritos e atualizar.

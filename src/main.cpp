@@ -3,6 +3,7 @@
 #include "demo_renderer.hpp"
 #include "library.hpp"
 #include "cJSON.h"
+#include "cover_decode.h"
 #include <array>
 #include <atomic>
 #include <cstdio>
@@ -24,14 +25,18 @@ std::uint64_t sceKernelGetProcessTime();int sceKernelDebugOutText(int,const char
 int sceNetSocket(const char*,int,int,int);int sceNetConnect(int,const void*,std::uint32_t);int sceNetSend(int,const void*,std::size_t,int);int sceNetRecv(int,void*,std::size_t,int);int sceNetSetsockopt(int,int,int,const void*,std::uint32_t);int sceNetSocketClose(int);
 }
 namespace {
-constexpr Color bg=static_cast<Color>(0xff121610),panel=static_cast<Color>(0xff20271d),accent=static_cast<Color>(0xff91e8cd),muted=static_cast<Color>(0xffa2b09d),white=Color::white;
+constexpr Color bg=static_cast<Color>(0xff171310),panel=static_cast<Color>(0xff27211c),accent=static_cast<Color>(0xffb9e8a8),muted=static_cast<Color>(0xffa2b09d),white=Color::white;
 constexpr std::uint32_t UP=0x10,RIGHT=0x20,DOWN=0x40,LEFT=0x80,L1=0x400,R1=0x800,TRIANGLE=0x1000,CIRCLE=0x2000,CROSS=0x4000,SQUARE=0x8000,OPTIONS=0x8;
 Library db{};Game games[max_games]{};int count=0;bool selected[max_games]{};
 int filtered[max_games]{},filtered_count=0,cursor=0,view=0,nav_cursor=0,nav_views[40]{},nav_count=0;
 bool nav_focus=false,storage_ok=false;int pad=-1;std::uint32_t held=0;std::uint64_t retry_pad=0,repeat_at=0;
 char message[180]="INICIANDO";char connection[96]="CATALOGO LOCAL";char entry_name[40]{};
 int modal=0,menu_cursor=0,keyboard_cursor=0,edit_slot=-1,new_parent=-1,launch_index=-1;
-std::atomic<int> work{0};char request_path[160]{};char response[1024*1024]{};int work_kind=0;bool response_ok=false;
+std::atomic<int> work{0};char request_path[160]{};char response[1024*1024]{};int work_kind=0;int pending_kind=0;char pending_path[160]{};bool response_ok=false;std::size_t response_size=0;
+constexpr unsigned cover_edge=256;
+struct Cover {char id[10];bool ready;std::uint64_t age;std::uint32_t pixels[cover_edge*cover_edge];};
+Cover covers[16]{};std::uint64_t cover_clock=0;char requested_cover[10]{};std::uint32_t decoded_cover[cover_edge*cover_edge]{};bool cover_ok=false;
+char failed_covers[max_games][10]{};int failed_cover_count=0;
 constexpr char keys[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -";
 constexpr int key_count=sizeof(keys)-1;
 void log(const char* text){char line[220];std::snprintf(line,sizeof line,"ESTANTE: %s\n",text);sceKernelDebugOutText(0,line);}
@@ -76,7 +81,7 @@ int chosen_count(){int n=0;for(int i=0;i<count;i++)if(selected[i])n++;return n;}
 int target_index(){return filtered_count?filtered[cursor]:-1;}
 template<class Fn> void update_targets(Fn fn){Library next=db;bool batch=chosen_count()>0;int target=target_index();for(int i=0;i<count;i++)if((batch&&selected[i])||(!batch&&i==target)){Meta* m=metadata(next,games[i].id);if(m)fn(*m);}if(persist(next))rebuild();}
 bool http_get(const char* path){
- response[0]=0;int s=sceNetSocket("estante",2,1,6);if(s<0)return false;const int timeout=3000000;
+ response[0]=0;response_size=0;int s=sceNetSocket("estante",2,1,6);if(s<0)return false;const int timeout=3000000;
  for(int opt:{0x1105,0x1106,0x1109})sceNetSetsockopt(s,0xffff,opt,&timeout,sizeof timeout);
  constexpr std::uint16_t port=6969;NetAddress address{sizeof(NetAddress),2,static_cast<std::uint16_t>((port<<8)|(port>>8)),0x0100007f,0,{}};
  if(sceNetConnect(s,&address,sizeof address)<0){sceNetSocketClose(s);return false;}
@@ -88,19 +93,42 @@ bool http_get(const char* path){
  char* body=std::strstr(response,"\r\n\r\n");if(!body)return false;
  // HTTP/1.0 requested: don't feed unsupported chunked bodies to JSON parser.
  if(std::strstr(response,"Transfer-Encoding: chunked")||std::strstr(response,"transfer-encoding: chunked"))return false;
- body+=4;std::memmove(response,body,std::strlen(body)+1);return true;
+ body+=4;response_size=used-static_cast<std::size_t>(body-response);std::memmove(response,body,response_size);response[response_size]=0;return true;
 }
-void* worker(void*){response_ok=http_get(request_path);work.store(2,std::memory_order_release);return nullptr;}
+void* worker(void*){
+ response_ok=http_get(request_path);
+ if(work_kind==3)cover_ok=response_ok&&decode_cover(reinterpret_cast<unsigned char*>(response),response_size,decoded_cover,cover_edge);
+ work.store(2,std::memory_order_release);return nullptr;
+}
 void start_request(int kind,const char* path){
- if(work.load()!=0){msg("AGUARDE A CONSULTA ATUAL");return;}work_kind=kind;std::snprintf(request_path,sizeof request_path,"%s",path);work.store(1);
+ if(work.load()!=0){if(kind!=3){pending_kind=kind;std::snprintf(pending_path,sizeof pending_path,"%s",path);msg("AGUARDE A CONSULTA ATUAL");}return;}work_kind=kind;std::snprintf(request_path,sizeof request_path,"%s",path);work.store(1);
  pthread_t thread{};if(pthread_create(&thread,nullptr,worker,nullptr)!=0){work.store(0);msg("NAO FOI POSSIVEL INICIAR A CONSULTA");return;}pthread_detach(thread);
- msg(kind==1?"ATUALIZANDO TITULOS DO PS5":"SOLICITANDO LANCAMENTO AO PS5");
+ if(kind!=3)msg(kind==1?"ATUALIZANDO TITULOS DO PS5":"SOLICITANDO LANCAMENTO AO PS5");
+}
+Cover* find_cover(const char* id){for(auto& cover:covers)if(cover.ready&&!std::strcmp(cover.id,id))return &cover;return nullptr;}
+void request_visible_cover(){
+ if(work.load()!=0||modal)return;
+ int start=(cursor/8)*8;
+ for(int row=0;row<8&&start+row<filtered_count;row++){
+  const char* id=games[filtered[start+row]].id;
+  if(find_cover(id))continue;bool failed=false;
+  for(int i=0;i<failed_cover_count;i++)if(!std::strcmp(failed_covers[i],id))failed=true;
+  if(failed)continue;
+  std::snprintf(requested_cover,sizeof requested_cover,"%s",id);
+  char path[80];std::snprintf(path,sizeof path,"/appdb/icon?id=%s",id);start_request(3,path);break;
+ }
 }
 void poll_work(){
  if(work.load(std::memory_order_acquire)!=2)return;
  if(work_kind==1){static Game next[max_games];int n=response_ok?read_catalog(response,next,max_games):-1;if(n>=0){std::memcpy(games,next,sizeof games);count=n;std::memset(selected,0,sizeof selected);if(storage_ok)write_file("/download0/catalog.json",response);std::snprintf(connection,sizeof connection,"CATALOGO AO VIVO - ELF ARSENAL");msg("BIBLIOTECA ATUALIZADA");rebuild();}else{std::snprintf(connection,sizeof connection,"CATALOGO EM CACHE - API INDISPONIVEL");msg("FALHA NA API LOCAL; CATALOGO PRESERVADO");}}
+ else if(work_kind==3){
+  if(cover_ok){int slot=0;for(int i=0;i<16;i++){if(!covers[i].ready){slot=i;break;}if(covers[i].age<covers[slot].age)slot=i;}
+   auto& dest=covers[slot];std::snprintf(dest.id,sizeof dest.id,"%s",requested_cover);std::memcpy(dest.pixels,decoded_cover,sizeof decoded_cover);dest.ready=true;dest.age=++cover_clock;
+  }else if(failed_cover_count<max_games)std::snprintf(failed_covers[failed_cover_count++],10,"%s",requested_cover);
+ }
  else msg(response_ok?"PEDIDO ENVIADO. CONFIRA SE O JOGO ABRIU.":"FALHA AO ENVIAR O PEDIDO DE LANCAMENTO");
  work.store(0);
+ if(pending_kind){int next_kind=pending_kind;pending_kind=0;start_request(next_kind,pending_path);}
 }
 std::uint32_t buttons(){
  auto now=sceKernelGetProcessTime();
@@ -149,46 +177,64 @@ void input(std::uint32_t b){
    else if(action==10){if(view>=100)modal=4;else msg("SELECIONE UMA PASTA");}
    else if(action==11){for(int i=0;i<filtered_count;i++)selected[filtered[i]]=true;}
    else if(action==12)std::memset(selected,0,sizeof selected);
-   else if(action==13)start_request(1,"/appdb");
+   else if(action==13){failed_cover_count=0;start_request(1,"/appdb");}
   }return;
  }
  if(b&(TRIANGLE|OPTIONS)){modal=1;menu_cursor=0;return;}
- if(b&LEFT)nav_focus=true;if(b&RIGHT)nav_focus=false;
+ if(nav_focus&&(b&RIGHT))nav_focus=false;
+ else if(!nav_focus&&(b&LEFT)){if(cursor%4==0)nav_focus=true;else cursor--;}
+ else if(!nav_focus&&(b&RIGHT)&&cursor+1<filtered_count&&cursor%4<3)cursor++;
  if(nav_focus){if(b&UP)nav_cursor=(nav_cursor+nav_count-1)%nav_count;if(b&DOWN)nav_cursor=(nav_cursor+1)%nav_count;if(b&CROSS){view=nav_views[nav_cursor];cursor=0;std::memset(selected,0,sizeof selected);rebuild();nav_focus=false;}}
  else {
-  if(filtered_count){if(b&UP)cursor=(cursor+filtered_count-1)%filtered_count;if(b&DOWN)cursor=(cursor+1)%filtered_count;if(b&L1)cursor=cursor>=12?cursor-12:0;if(b&R1)cursor=cursor+12<filtered_count?cursor+12:filtered_count-1;
+  if(filtered_count){if(b&UP)cursor=cursor>=4?cursor-4:cursor;if(b&DOWN)cursor=cursor+4<filtered_count?cursor+4:cursor;if(b&L1)cursor=cursor>=8?cursor-8:0;if(b&R1)cursor=cursor+8<filtered_count?cursor+8:filtered_count-1;
    if(b&SQUARE)selected[filtered[cursor]]=!selected[filtered[cursor]];
    if(b&CROSS){launch_index=filtered[cursor];modal=5;}
   }if(b&CIRCLE)nav_focus=true;
  }
 }
 void draw(Canvas& c) noexcept {
- poll_work();input(buttons());c.clear(bg);c.rectangle(0,0,415,1080,panel);
- display_text(c,55,55,"ESTANTE",7,accent);display_text(c,55,125,"BIBLIOTECA NO PS5",2,muted);
- int navstart=nav_cursor>=14?nav_cursor-13:0;
- for(int i=navstart;i<nav_count&&i<navstart+16;i++){
-  int y=195+(i-navstart)*43,v=nav_views[i];bool focus=nav_focus&&i==nav_cursor;
-  if(focus||v==view)c.rectangle(30,y-8,355,38,focus?accent:static_cast<Color>(0xff394532));
-  int depth=0;if(v>=100){int p=db.folders[v-100].parent;while(p>=0&&depth<10){depth++;p=db.folders[p].parent;}}
-  display_text(c,50+static_cast<unsigned>(depth*10),y,view_name(v),2,focus?bg:white,25-depth);
+ poll_work();input(buttons());request_visible_cover();c.clear(bg);
+ c.rectangle(0,0,370,1080,panel);
+ display_text(c,52,55,"ESTANTE",6,accent);display_text(c,54,119,"SUA COLECAO. SEU JEITO.",2,muted);
+ display_text(c,54,188,"BIBLIOTECA",2,muted);
+ int navstart=nav_cursor>=13?nav_cursor-12:0;
+ for(int i=navstart;i<nav_count&&i<navstart+14;i++){
+  int y=240+(i-navstart)*46,v=nav_views[i];bool focus=nav_focus&&i==nav_cursor;
+  if(focus||v==view)c.rounded_rectangle(30,y-11,310,40,9,focus?accent:static_cast<Color>(0xff42382d));
+  int depth=0;if(v>=100){int p=db.folders[v-100].parent;while(p>=0&&depth<8){depth++;p=db.folders[p].parent;}}
+  display_text(c,50+static_cast<unsigned>(depth*10),y,view_name(v),2,focus?bg:white,23-depth);
  }
- display_text(c,460,60,view_name(view),5,white,45);
- char summary[120];std::snprintf(summary,sizeof summary,"%d TITULOS   %d SELECIONADOS   %s",filtered_count,chosen_count(),storage_ok?"SALVAMENTO LOCAL":"SEM SALVAMENTO");
- display_text(c,460,120,summary,2,muted);display_text(c,460,155,connection,2,accent);
- int start=(cursor/12)*12;
- for(int row=0;row<12&&start+row<filtered_count;row++){
-  int pos=start+row,idx=filtered[pos];const auto& g=games[idx];bool focus=!nav_focus&&pos==cursor;int y=215+row*55;
-  c.rectangle(450,y-10,1405,49,focus?accent:panel);
-  display_text(c,468,y,selected[idx]?"X":" ",3,focus?bg:accent);
-  display_text(c,505,y,g.name,3,focus?bg:white,60);
-  char detail[30];const Meta* m=metadata(db,g.id);int p=platform(g,db);std::snprintf(detail,sizeof detail,"%s%s",m&&m->favorite?"FAV ":"",p==2?"PS2":p==4?"PS4":p==5?"PS5":"APP");
-  display_text(c,1640,y,detail,2,focus?bg:muted,14);
+ display_text(c,54,925,storage_ok?"ORGANIZACAO SALVA":"SALVAMENTO INDISPONIVEL",2,storage_ok?accent:Color::yellow,25);
+ display_text(c,54,961,"TRIANGULO: ORGANIZAR",2,muted);
+ display_text(c,415,52,view_name(view),4,white,57);
+ char summary[120];std::snprintf(summary,sizeof summary,"%d JOGOS   /   %d SELECIONADOS",filtered_count,chosen_count());
+ display_text(c,418,108,summary,2,muted);
+ int start=(cursor/8)*8;
+ for(int row=0;row<8&&start+row<filtered_count;row++){
+  int pos=start+row,idx=filtered[pos];const auto& g=games[idx];bool focus=!nav_focus&&pos==cursor;
+  unsigned x=416+(row%4)*360,y=170+(row/4)*343;
+  if(focus)c.rounded_rectangle(x-5,y-5,342,324,15,accent);
+  c.rounded_rectangle(x,y,332,314,12,panel);
+  auto* cover=find_cover(g.id);
+  if(cover){cover->age=++cover_clock;c.image(x+38,y+12,cover_edge,cover->pixels);}
+  else {c.rounded_rectangle(x+38,y+12,256,256,8,static_cast<Color>(0xff39312a));
+   c.rectangle(x+123,y+79,84,7,muted);c.rectangle(x+123,y+110,65,7,muted);c.rectangle(x+123,y+141,84,7,muted);
+   display_text(c,x+71,y+204,g.id,2,muted,9);}
+  display_text(c,x+18,y+281,g.name,2,focus?accent:white,25);
+  const Meta* m=metadata(db,g.id);int p=platform(g,db);
+  c.rounded_rectangle(x+12,y+12,68,30,6,bg);
+  display_text(c,x+24,y+20,p==2?"PS2":p==4?"PS4":p==5?"PS5":"APP",2,white);
+  if(selected[idx]){c.rounded_rectangle(x+280,y+12,38,34,7,accent);display_text(c,x+292,y+22,"X",2,bg);}
+  else if(m&&m->favorite){c.rounded_rectangle(x+252,y+12,66,30,6,bg);display_text(c,x+265,y+20,"FAV",2,accent);}
  }
- if(!filtered_count)display_text(c,500,300,"COLECAO VAZIA - USE TRIANGULO PARA ORGANIZAR",3,muted,65);
- display_text(c,460,905,message,2,accent,110);
- display_text(c,50,975,"DIRECIONAL NAVEGAR   X ABRIR   QUADRADO SELECIONAR   TRIANGULO ORGANIZAR",3,white,95);
- display_text(c,50,1020,"L1 R1 PAGINAS   ESQUERDA PASTAS   BOTAO PS PARA SAIR",2,muted);
- if(pad<0)display_text(c,460,860,"AGUARDANDO CONTROLE DO USUARIO",3,Color::yellow);
+ if(!filtered_count){display_text(c,480,330,"SUA PROXIMA COLECAO COMECA AQUI",4,white,48);display_text(c,480,400,"TRIANGULO PARA CRIAR PASTAS OU ATUALIZAR A BIBLIOTECA",2,muted,70);}
+ if(filtered_count){display_text(c,418,872,games[filtered[cursor]].name,3,white,76);}
+ display_text(c,418,918,message,2,accent,110);
+ c.rectangle(400,968,1465,2,static_cast<Color>(0xff39312a));
+ display_text(c,418,993,"X JOGAR   QUADRADO SELECIONAR   TRIANGULO ORGANIZAR   L1 R1 PAGINAS",2,white,105);
+ char page[50];std::snprintf(page,sizeof page,"PAGINA %d / %d",filtered_count?cursor/8+1:0,(filtered_count+7)/8);
+ display_text(c,418,1030,page,2,muted);display_text(c,1130,1030,"CIRCULO COLECOES   PS SAIR",2,muted);
+ if(pad<0)display_text(c,418,950,"AGUARDANDO CONTROLE",2,Color::yellow);
  if(modal){
   c.rectangle(425,170,1430,750,bg);c.rectangle(440,185,1400,720,panel);
   if(modal==1){display_text(c,490,210,"ORGANIZAR TITULOS",4,accent);for(int i=0;i<14;i++){int y=280+i*40;if(i==menu_cursor)c.rectangle(480,y-7,1320,35,accent);display_text(c,500,y,menu_items[i],3,i==menu_cursor?bg:white,68);}}

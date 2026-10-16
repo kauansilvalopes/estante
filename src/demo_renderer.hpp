@@ -41,7 +41,12 @@ namespace detail
 class Canvas final
 {
   public:
+#ifdef ESTANTE_HOST_PREVIEW
+    static Canvas host_preview(std::uint32_t* pixels) noexcept {return Canvas(pixels);}
+#endif
     void clear(Color color) noexcept;
+    void image(unsigned x, unsigned y, unsigned edge, const std::uint32_t* pixels) noexcept;
+    void rounded_rectangle(unsigned x, unsigned y, unsigned width, unsigned height, unsigned radius, Color color) noexcept;
     void rectangle(unsigned x, unsigned y, unsigned width, unsigned height, Color color) noexcept;
     void circle(unsigned center_x, unsigned center_y, unsigned radius, Color color) noexcept;
     void triangle(unsigned center_x, unsigned top, unsigned half_width, unsigned height,

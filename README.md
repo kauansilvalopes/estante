@@ -6,6 +6,28 @@ Organizador de biblioteca que roda no proprio PS5, com navegacao pelo controle.
 o registro do titulo foi confirmado, mas abertura, controle, persistencia e lancamento
 de jogos ainda aguardam validacao no console. Nao e uma versao estavel.
 
+## Interface com imagens (branch feat/cover-grid)
+
+Esta branch adiciona grade de oito jogos, imagens obtidas da API local do Elf Arsenal,
+foco destacado, cache em memoria e carregamento em segundo plano. PNG/JPEG sao
+reduzidos para 256 px sem cortar a imagem. Um card com titulo e identificador aparece
+quando a imagem esta ausente. Nenhuma capa e publicada no repositorio.
+
+A direcao visual esta registrada em [DESIGN.md](DESIGN.md), com referencia ao getdesign.md.
+A tipografia bitmap ainda e uma limitacao; desempenho e aparencia na TV aguardam teste
+no PS5. A versao instalada anteriormente no console nao foi atualizada por este commit.
+
+Para inspecionar o desenho real da interface com dados ficticios no computador:
+`bash tools/preview-estante.sh` (gera `.local/grid-preview.png`). Isso e uma ferramenta
+de desenvolvimento, nao a interface usada pelo jogador.
+
+Teste adicional do decodificador:
+
+```sh
+clang-18 -g -fsanitize=address,undefined tests/test_cover_decode.c src/cover_decode.c -lm -o build/tests/test-cover
+build/tests/test-cover
+```
+
 ## Recursos implementados
 
 - Pastas e subpastas dentro do aplicativo (ate 32).
@@ -69,6 +91,7 @@ de BlackBearReloaded, sob GPL-3.0-or-later. Os avisos de autoria foram preservad
 Documentacao original: [docs/UPSTREAM_README.md](docs/UPSTREAM_README.md).
 
 - SDK publico: [ps5-payload-dev/sdk](https://github.com/ps5-payload-dev/sdk), v0.42.
+- stb_image: MIT / dominio publico; origem fixada em [third_party/stb/SOURCE.md](third_party/stb/SOURCE.md).
 - cJSON 1.7.19: MIT, veja [LICENSE-cJSON](LICENSE-cJSON).
 - Licenca do projeto: [LICENSE](LICENSE); demais avisos: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
