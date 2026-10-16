@@ -43,7 +43,7 @@ bool read_library(const char* text,Library& out){
  const cJSON* g=nullptr;if(ok)cJSON_ArrayForEach(g,gs){
   const cJSON *id=field(g,"id"),*p=field(g,"platform"),*mask=field(g,"folders"),*fav=field(g,"favorite");
   if(temp.count>=max_games||!cJSON_IsString(id)||!valid_id(id->valuestring)||!cJSON_IsNumber(p)||p->valuedouble!=p->valueint||!cJSON_IsNumber(mask)||mask->valuedouble<0||mask->valuedouble>4294967295.0||!cJSON_IsBool(fav)){ok=false;break;}
-  Meta& dest=temp.games[temp.count++];std::snprintf(dest.id,sizeof dest.id,"%s",id->valuestring);dest.platform=p->valueint;dest.folders=static_cast<std::uint32_t>(mask->valuedouble);if(mask->valuedouble!=dest.folders){ok=false;break;}dest.favorite=cJSON_IsTrue(fav);
+  Meta& dest=temp.games[temp.count++];std::snprintf(dest.id,sizeof dest.id,"%s",id->valuestring);dest.platform=p->valueint;dest.folders=static_cast<std::uint32_t>(mask->valuedouble);if(mask->valuedouble!=dest.folders){ok=false;break;}dest.favorite=cJSON_IsTrue(fav);{const cJSON* hid=field(g,"hidden");if(hid&&!cJSON_IsBool(hid)){ok=false;break;}dest.hidden=cJSON_IsTrue(hid);}
  }
  ok=ok&&valid_library(temp);if(ok)out=temp;cJSON_Delete(root);return ok;
 }
@@ -51,7 +51,7 @@ char* write_library(const Library& d){
  if(!valid_library(d))return nullptr;cJSON* root=cJSON_CreateObject();if(!root)return nullptr;cJSON_AddNumberToObject(root,"version",1);
  cJSON* fs=cJSON_AddArrayToObject(root,"folders"),*gs=cJSON_AddArrayToObject(root,"games");
  for(int i=0;i<max_folders;i++)if(d.folders[i].used){cJSON* f=cJSON_CreateObject();cJSON_AddNumberToObject(f,"slot",i);cJSON_AddNumberToObject(f,"parent",d.folders[i].parent);cJSON_AddStringToObject(f,"name",d.folders[i].name);cJSON_AddItemToArray(fs,f);}
- for(int i=0;i<d.count;i++){const Meta& m=d.games[i];cJSON* g=cJSON_CreateObject();cJSON_AddStringToObject(g,"id",m.id);cJSON_AddNumberToObject(g,"platform",m.platform);cJSON_AddNumberToObject(g,"folders",m.folders);cJSON_AddBoolToObject(g,"favorite",m.favorite);cJSON_AddItemToArray(gs,g);}
+ for(int i=0;i<d.count;i++){const Meta& m=d.games[i];cJSON* g=cJSON_CreateObject();cJSON_AddStringToObject(g,"id",m.id);cJSON_AddNumberToObject(g,"platform",m.platform);cJSON_AddNumberToObject(g,"folders",m.folders);cJSON_AddBoolToObject(g,"favorite",m.favorite);cJSON_AddBoolToObject(g,"hidden",m.hidden);cJSON_AddItemToArray(gs,g);}
  char* text=cJSON_PrintUnformatted(root);cJSON_Delete(root);return text;
 }
 bool delete_folder(Library& d,int slot){if(slot<0||slot>=max_folders||!d.folders[slot].used)return false;std::uint32_t removed=std::uint32_t(1)<<slot;bool again=true;while(again){again=false;for(int i=0;i<max_folders;i++)if(d.folders[i].used&&d.folders[i].parent>=0&&(removed&(std::uint32_t(1)<<d.folders[i].parent))&&!(removed&(std::uint32_t(1)<<i))){removed|=std::uint32_t(1)<<i;again=true;}}for(int i=0;i<max_folders;i++)if(removed&(std::uint32_t(1)<<i))d.folders[i]={};for(int i=0;i<d.count;i++)d.games[i].folders&=~removed;return true;}

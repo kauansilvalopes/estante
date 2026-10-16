@@ -6,16 +6,24 @@ Organizador de biblioteca que roda no proprio PS5, com navegacao pelo controle.
 o registro do titulo foi confirmado, mas abertura, controle, persistencia e lancamento
 de jogos ainda aguardam validacao no console. Nao e uma versao estavel.
 
-## Interface com imagens (branch feat/cover-grid)
+## Interface (v0.2.0)
 
-Esta branch adiciona grade de oito jogos, imagens obtidas da API local do Elf Arsenal,
-foco destacado, cache em memoria e carregamento em segundo plano. PNG/JPEG sao
-reduzidos para 256 px sem cortar a imagem. Um card com titulo e identificador aparece
-quando a imagem esta ausente. Nenhuma capa e publicada no repositorio.
+Grade de oito jogos com capas obtidas da API local do Elf Arsenal, foco destacado,
+cache em memoria e carregamento em segundo plano. PNG/JPEG sao reduzidos para 316 px
+sem cortar a imagem; um card com titulo e identificador aparece quando nao ha imagem
+(por exemplo, jogos de PS2). Nenhuma capa e publicada no repositorio.
 
-A direcao visual esta registrada em [DESIGN.md](DESIGN.md), com referencia ao getdesign.md.
-A tipografia bitmap ainda e uma limitacao; desempenho e aparencia na TV aguardam teste
-no PS5. A versao instalada anteriormente no console nao foi atualizada por este commit.
+- **Capas grandes** de ponta a ponta no card, com o cabecalho tingido pela cor da capa focada.
+- **Contagem de titulos** em cada colecao da barra lateral.
+- **Selo de plataforma** (PS2, PS4, PS5) so nas visoes mistas, com cor por plataforma.
+- **Modo gravacao** (liga ao abrir): esconde mensagens de status e a linha de comandos,
+  deixando so a biblioteca. Alterne com **R3** ou pelo menu Organizar.
+- **Ocultar titulos:** a acao "Ocultar ou mostrar titulo" move o jogo para a colecao
+  OCULTOS; ele deixa de aparecer nas outras visoes e pode ser mostrado de novo.
+- **Redesenho so quando algo muda**, porque o renderizador por CPU e lento.
+- Fonte bitmap so com maiusculas e sem acentos; esse e um limite conhecido.
+
+A direcao visual esta registrada em [DESIGN.md](DESIGN.md).
 
 Para inspecionar o desenho real da interface com dados ficticios no computador:
 `bash tools/preview-estante.sh` (gera `.local/grid-preview.png`). Isso e uma ferramenta
@@ -85,6 +93,8 @@ Esses testes nao validam o funcionamento no hardware. Os workflows originais da
 base estao arquivados em `docs/upstream-workflows`, sem execucao automatica.
 
 ## Creditos e licenca
+
+Autor do Estante: Kauan ([@kndofc](https://instagram.com/kndofc)).
 
 Derivado de [ps5-native-app-boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate),
 de BlackBearReloaded, sob GPL-3.0-or-later. Os avisos de autoria foram preservados.

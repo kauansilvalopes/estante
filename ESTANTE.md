@@ -1,4 +1,4 @@
-# Estante ? prototipo nativo de PS5
+# Estante - prototipo nativo de PS5
 
 Aplicativo em pasta para ShadowMount. Identificador: PPSA99841.
 Nao modifica as pastas do menu oficial: organiza colecoes dentro do Estante.
@@ -10,6 +10,8 @@ Nao move, apaga nem reinstala jogos. PS2 portado como PS4 requer classificacao m
 - Quadrado: selecionar varios titulos.
 - Triangulo / Options: organizar, classificar, criar pastas, favoritos e atualizar.
 - L1 / R1: paginas; circulo: voltar; botao PS: sair pelo sistema.
+- R3: modo gravacao (esconde textos de status e comandos); abre ligado.
+- Triangulo > "Ocultar ou mostrar titulo": move o jogo para OCULTOS e de volta.
 - Teclado de pastas: X digita, quadrado apaga, Options salva.
 
 ## Dados e dependencias

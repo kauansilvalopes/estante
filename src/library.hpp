@@ -5,7 +5,7 @@
 namespace estante {
 constexpr int max_games=1024,max_folders=32;
 struct Game { char id[10]; char name[192]; };
-struct Meta { char id[10]; int platform; bool favorite; std::uint32_t folders; };
+struct Meta { char id[10]; int platform; bool favorite; std::uint32_t folders; bool hidden; };
 struct Folder { bool used; int parent; char name[40]; };
 struct Library { Folder folders[max_folders]; Meta games[max_games]; int count; };
 bool valid_id(const char*);

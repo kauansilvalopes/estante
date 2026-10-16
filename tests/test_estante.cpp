@@ -9,7 +9,10 @@ int main(){
  auto* m=metadata(d,"CUSA12345");assert(m);m->platform=2;m->folders=7;m->favorite=true;
  assert(valid_library(d));Game g{"CUSA12345","Teste"};assert(platform(g,d)==2);
  char* s=write_library(d);assert(s);Library copy{};assert(read_library(s,copy));cJSON_free(s);
- assert(copy.games[0].folders==7&&copy.games[0].favorite);
+ assert(copy.games[0].folders==7&&copy.games[0].favorite&&!copy.games[0].hidden);
+ {Library h=copy;h.games[0].hidden=true;char* t=write_library(h);assert(t);Library back{};assert(read_library(t,back));assert(back.games[0].hidden);cJSON_free(t);}
+ Library extra{};assert(read_library("{\"version\":1,\"folders\":[],\"games\":[{\"id\":\"CUSA12345\",\"platform\":2,\"favorite\":false,\"folders\":0}]}",extra)&&!extra.games[0].hidden);
+ assert(!read_library("{\"version\":1,\"folders\":[],\"games\":[{\"id\":\"CUSA12345\",\"platform\":2,\"favorite\":false,\"folders\":0,\"hidden\":1}]}",extra));
  assert(delete_folder(copy,0));assert(copy.games[0].folders==4);assert(!copy.folders[1].used&&copy.folders[2].used);
  d.folders[0].parent=1;assert(!valid_library(d));
  Library unchanged=copy;assert(!read_library("{\"version\":2}",copy));assert(!std::memcmp(&copy,&unchanged,sizeof copy));

@@ -9,7 +9,7 @@ std::uint64_t sceKernelGetProcessTime(){return 0;}int sceKernelDebugOutText(int,
 int sceNetSocket(const char*,int,int,int){return -1;}int sceNetConnect(int,const void*,std::uint32_t){return -1;}int sceNetSend(int,const void*,std::size_t,int){return -1;}int sceNetRecv(int,void*,std::size_t,int){return -1;}int sceNetSetsockopt(int,int,int,const void*,std::uint32_t){return -1;}int sceNetSocketClose(int){return 0;}
 }
 int main(int argc,char** argv){
- if(argc!=2)return 2;
+ if(argc<2||argc>3)return 2;
  static std::uint32_t frame[0x1000000/4];
  const char* names[]={"HORIZON EXPLORER","GRAND CIRCUIT","THE LAST JOURNEY","STELLAR ADVENTURE","SHADOW OF THE VALLEY","RACING LEGENDS","MOUNTAIN QUEST","LITTLE PLANET"};
  count=8;for(int i=0;i<count;i++){
@@ -23,6 +23,8 @@ int main(int argc,char** argv){
  start_request(2,"/launch?titleId=PPSA90000");assert(pending_kind==2);pending_kind=0;
 
  std::snprintf(message,sizeof message,"SUA BIBLIOTECA, ORGANIZADA DO SEU JEITO");
+ if(argc==3&&!std::strcmp(argv[2],"rec"))record_mode=true;
+ if(argc==3&&!std::strcmp(argv[2],"menu")){modal=1;menu_cursor=14;}
  auto canvas=Canvas::host_preview(frame);draw(canvas);
  FILE* f=std::fopen(argv[1],"wb");if(!f)return 3;std::fprintf(f,"P6\n1920 1080\n255\n");
  for(unsigned y=0;y<1080;y++)for(unsigned x=0;x<1920;x++){
