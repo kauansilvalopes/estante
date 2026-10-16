@@ -16,8 +16,8 @@ sem cortar a imagem; um card com titulo e identificador aparece quando nao ha im
 - **Capas grandes** de ponta a ponta no card, com o cabecalho tingido pela cor da capa focada.
 - **Contagem de titulos** em cada colecao da barra lateral.
 - **Selo de plataforma** (PS2, PS4, PS5) so nas visoes mistas, com cor por plataforma.
-- **Modo gravacao** (liga ao abrir): esconde mensagens de status e a linha de comandos,
-  deixando so a biblioteca. Alterne com **R3** ou pelo menu Organizar.
+- **Modo gravacao** (desligado ao abrir, para mostrar os comandos): esconde mensagens de status e a
+  linha de comandos, deixando so a biblioteca. Alterne com **R3** ou pelo menu Organizar.
 - **Ocultar titulos:** a acao "Ocultar ou mostrar titulo" move o jogo para a colecao
   OCULTOS; ele deixa de aparecer nas outras visoes e pode ser mostrado de novo.
 - **Redesenho so quando algo muda**, porque o renderizador por CPU e lento.

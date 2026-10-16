@@ -10,7 +10,7 @@ Nao move, apaga nem reinstala jogos. PS2 portado como PS4 requer classificacao m
 - Quadrado: selecionar varios titulos.
 - Triangulo / Options: organizar, classificar, criar pastas, favoritos e atualizar.
 - L1 / R1: paginas; circulo: voltar; botao PS: sair pelo sistema.
-- R3: modo gravacao (esconde textos de status e comandos); abre ligado.
+- R3: modo gravacao (esconde textos de status e comandos); abre desligado.
 - Triangulo > "Ocultar ou mostrar titulo": move o jogo para OCULTOS e de volta.
 - Teclado de pastas: X digita, quadrado apaga, Options salva.
 

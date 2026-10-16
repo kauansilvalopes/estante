@@ -37,7 +37,7 @@ constexpr unsigned cover_edge=316;
 struct Cover {char id[10];bool ready;std::uint64_t age;std::uint32_t pixels[cover_edge*cover_edge];};
 Cover covers[16]{};std::uint64_t cover_clock=0;char requested_cover[10]{};std::uint32_t decoded_cover[cover_edge*cover_edge]{};bool cover_ok=false;
 char failed_covers[max_games][10]{};int failed_cover_count=0;
-bool record_mode=true;int nav_totals[40]{};std::uint64_t ui_version=1,cover_version=1;
+bool record_mode=false;int nav_totals[40]{};std::uint64_t ui_version=1,cover_version=1;
 constexpr char keys[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -";
 constexpr int key_count=sizeof(keys)-1;
 void log(const char* text){char line[220];std::snprintf(line,sizeof line,"ESTANTE: %s\n",text);sceKernelDebugOutText(0,line);}
