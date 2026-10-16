@@ -29,7 +29,7 @@ elif [[ $# -ne 0 ]]; then
     exit 2
 fi
 
-for command in wget unzip sha256sum tar make; do
+for command in curl unzip sha256sum tar make; do
     command -v "$command" >/dev/null || {
         echo "missing required command: $command" >&2
         exit 2
@@ -47,7 +47,7 @@ mkdir -p "$cache"
 if ! $skip_sdk && [[ ! -x "$sdk/bin/prospero-lld" ]]; then
     archive="$cache/ps5-payload-sdk.zip"
     temporary="$archive.download"
-    wget -q "$sdk_url" -O "$temporary"
+    curl -fL --connect-timeout 15 --max-time 300 --retry 2 "$sdk_url" -o "$temporary"
     printf '%s  %s\n' "$sdk_hash" "$temporary" | sha256sum --check --strict
     mv "$temporary" "$archive"
     unzip -q -o "$archive" -d "$cache"
@@ -68,7 +68,7 @@ if [[ -z $zlib_library || ! -f $zlib_root/usr/include/zlib.h ||
         rm -f -- "$zlib_archive"
     fi
     if [[ ! -f $zlib_archive ]]; then
-        wget -q "$zlib_url" -O "$zlib_archive.download"
+        curl -fL --connect-timeout 15 --max-time 300 --retry 2 "$zlib_url" -o "$zlib_archive.download"
         mv "$zlib_archive.download" "$zlib_archive"
     fi
     printf '%s  %s\n' "$zlib_hash" "$zlib_archive" | sha256sum --check --strict >/dev/null

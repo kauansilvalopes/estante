@@ -1,0 +1,20 @@
+#include "../src/library.hpp"
+#include "../src/cJSON.h"
+#include <cassert>
+#include <cstring>
+#include <cstdio>
+using namespace estante;
+int main(){
+ Library d{};d.folders[0]={true,-1,"PS2"};d.folders[1]={true,0,"CORRIDA"};d.folders[2]={true,-1,"FAVORITOS"};
+ auto* m=metadata(d,"CUSA12345");assert(m);m->platform=2;m->folders=7;m->favorite=true;
+ assert(valid_library(d));Game g{"CUSA12345","Teste"};assert(platform(g,d)==2);
+ char* s=write_library(d);assert(s);Library copy{};assert(read_library(s,copy));cJSON_free(s);
+ assert(copy.games[0].folders==7&&copy.games[0].favorite);
+ assert(delete_folder(copy,0));assert(copy.games[0].folders==4);assert(!copy.folders[1].used&&copy.folders[2].used);
+ d.folders[0].parent=1;assert(!valid_library(d));
+ Library unchanged=copy;assert(!read_library("{\"version\":2}",copy));assert(!std::memcmp(&copy,&unchanged,sizeof copy));
+ Game out[3]{};assert(read_catalog("{\"titles\":[{\"titleId\":\"CUSA12345\",\"titleName\":\"A\"},{\"titleId\":\"CUSA12345\",\"titleName\":\"B\"},{\"titleId\":\"../bad\"}]}",out,3)==1);
+ assert(read_catalog("{\"titles\":[{\"titleId\":\"CUSA12345\"},{\"titleId\":\"PPSA12345\"}]}",out,1)==-1);
+ assert(!read_library("{\"version\":1,\"folders\":[],\"games\":[{\"id\":\"CUSA12345\",\"platform\":2,\"favorite\":false,\"folders\":1}]}",copy));
+ puts("PASS: catalog, bounds, duplicates, platform override, roundtrip, folder deletion, cycle and corrupt data rejection.");
+}
