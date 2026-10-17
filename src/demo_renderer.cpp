@@ -10,6 +10,9 @@
 #include "demo_renderer.hpp"
 
 #include <array>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -341,19 +344,195 @@ void flush_range(void *address, std::size_t length) noexcept
 }
 } // namespace
 
-void Canvas::image(unsigned x,unsigned y,unsigned edge,const std::uint32_t* source) noexcept {
-    if(!source||!edge||x>=frame_width||y>=frame_height)return;
-    for(unsigned row=0;row<edge&&y+row<frame_height;row++)
-        for(unsigned col=0;col<edge&&x+col<frame_width;col++)
-            put_pixel_unchecked(pixels_,x+col,y+row,static_cast<Color>(source[row*edge+col]));
+namespace
+{
+struct FontGlyph
+{
+    std::uint32_t code, size, offset;
+    std::int32_t left, top;
+    std::uint32_t width, height, advance;
+};
+unsigned char *font_data = nullptr;
+std::size_t font_bytes = 0;
+unsigned glyph_count = 0;
+bool font_tried = false;
+void load_font()
+{
+    if (font_tried)
+        return;
+    font_tried = true;
+#ifdef ESTANTE_HOST_PREVIEW
+    const char *path = "assets/fonts/noto.atlas";
+#else
+    const char *path = "/app0/assets/fonts/noto.atlas";
+#endif
+    FILE *f = std::fopen(path, "rb");
+    if (!f)
+        return;
+    if (std::fseek(f, 0, SEEK_END))
+    {
+        std::fclose(f);
+        return;
+    }
+    long n = std::ftell(f);
+    std::rewind(f);
+    if (n < 8 || n > 4 * 1024 * 1024)
+    {
+        std::fclose(f);
+        return;
+    }
+    auto *bytes = static_cast<unsigned char *>(std::malloc(n));
+    if (!bytes)
+    {
+        std::fclose(f);
+        return;
+    }
+    bool ok = std::fread(bytes, 1, n, f) == static_cast<std::size_t>(n);
+    std::fclose(f);
+    std::uint32_t header[2]{};
+    std::memcpy(header, bytes, 8);
+    if (!ok || header[0] != 0x46545345 || header[1] > 1200 ||
+        8 + header[1] * sizeof(FontGlyph) > static_cast<std::size_t>(n))
+    {
+        std::free(bytes);
+        return;
+    }
+    glyph_count = header[1];
+    font_data = bytes;
+    font_bytes = n;
 }
-void Canvas::rounded_rectangle(unsigned x,unsigned y,unsigned width,unsigned height,unsigned radius,Color color) noexcept {
-    if(!width||!height)return;
-    if(radius>width/2)radius=width/2;if(radius>height/2)radius=height/2;
-    rectangle(x+radius,y,width-2*radius,height,color);
-    rectangle(x,y+radius,width,height-2*radius,color);
-    if(radius){circle(x+radius,y+radius,radius,color);circle(x+width-radius-1,y+radius,radius,color);
-    circle(x+radius,y+height-radius-1,radius,color);circle(x+width-radius-1,y+height-radius-1,radius,color);}
+std::uint32_t next_code(std::string_view s, std::size_t &i)
+{
+    unsigned c = static_cast<unsigned char>(s[i++]);
+    if (c < 128)
+        return c;
+    int n = c >= 0xf0 ? 3 : c >= 0xe0 ? 2 : c >= 0xc0 ? 1 : 0;
+    if (!n)
+        return '?';
+    c &= (1u << (6 - n)) - 1;
+    while (n--)
+    {
+        if (i >= s.size() || (static_cast<unsigned char>(s[i]) & 0xc0) != 0x80)
+            return '?';
+        c = (c << 6) | (static_cast<unsigned char>(s[i++]) & 63);
+    }
+    return c;
+}
+const FontGlyph *glyph_for(std::uint32_t code, unsigned size)
+{
+    auto *glyphs = reinterpret_cast<const FontGlyph *>(font_data + 8);
+    for (unsigned i = 0; i < glyph_count; i++)
+        if (glyphs[i].code == code && glyphs[i].size == size)
+            return glyphs + i;
+    for (unsigned i = 0; i < glyph_count; i++)
+        if (glyphs[i].code == '?' && glyphs[i].size == size)
+            return glyphs + i;
+    return nullptr;
+}
+} // namespace
+void Canvas::dim() noexcept
+{
+    for (unsigned y = 0; y < frame_height; y++)
+        for (unsigned x = 0; x < frame_width; x++)
+        {
+            auto *d = reinterpret_cast<std::uint32_t *>(reinterpret_cast<unsigned char *>(pixels_) +
+                                                        tiled_byte_offset(x, y));
+            *d = 0xff000000u | ((*d & 0x00fefefeu) >> 1);
+        }
+}
+void Canvas::label(unsigned x, unsigned y, std::string_view value, unsigned size, Color color,
+                   unsigned max_width) noexcept
+{
+    load_font();
+    if (!font_data)
+    {
+        text(x, y, value, size >= 44 ? 5 : 3, color);
+        return;
+    }
+    const unsigned origin = x;
+    const auto fg = static_cast<std::uint32_t>(color);
+    for (std::size_t i = 0; i < value.size();)
+    {
+        auto code = next_code(value, i);
+        auto *g = glyph_for(code, size);
+        if (!g)
+            continue;
+        const auto *dots = glyph_for(0x2026, size);
+        bool truncated =
+            x - origin + g->advance + (i < value.size() && dots ? dots->advance : 0) > max_width;
+        if (truncated)
+        {
+            if (!dots || x - origin + dots->advance > max_width)
+                break;
+            g = dots;
+            i = value.size();
+        }
+        const std::size_t start = 8 + glyph_count * sizeof(FontGlyph) + g->offset;
+        if (g->width > 256 || g->height > 256 || start + g->width * g->height > font_bytes)
+            continue;
+        for (unsigned yy = 0; yy < g->height; yy++)
+            for (unsigned xx = 0; xx < g->width; xx++)
+            {
+                unsigned a = font_data[start + yy * g->width + xx];
+                if (!a)
+                    continue;
+                int px = static_cast<int>(x) + g->left + xx,
+                    py = static_cast<int>(y + size) + g->top + yy;
+                if (px < 0 || py < 0 || px >= static_cast<int>(frame_width) ||
+                    py >= static_cast<int>(frame_height))
+                    continue;
+                auto *dest = reinterpret_cast<std::uint32_t *>(
+                    reinterpret_cast<unsigned char *>(pixels_) + tiled_byte_offset(px, py));
+                unsigned old = *dest, inv = 255 - a,
+                         red = ((fg & 255) * a + (old & 255) * inv) / 255,
+                         green = (((fg >> 8) & 255) * a + ((old >> 8) & 255) * inv) / 255,
+                         blue = (((fg >> 16) & 255) * a + ((old >> 16) & 255) * inv) / 255;
+                *dest = 0xff000000u | (blue << 16) | (green << 8) | red;
+            }
+        x += g->advance;
+    }
+}
+void Canvas::picture(unsigned x, unsigned y, unsigned width, unsigned height, unsigned source_edge,
+                     const std::uint32_t *source) noexcept
+{
+    if (!source || !source_edge || !width || !height || x >= frame_width || y >= frame_height)
+        return;
+    for (unsigned yy = 0; yy < height && y + yy < frame_height; yy++)
+        for (unsigned xx = 0; xx < width && x + xx < frame_width; xx++)
+            put_pixel_unchecked(
+                pixels_, x + xx, y + yy,
+                static_cast<Color>(
+                    source[(static_cast<std::size_t>(yy) * source_edge / height) * source_edge +
+                           static_cast<std::size_t>(xx) * source_edge / width]));
+}
+
+void Canvas::image(unsigned x, unsigned y, unsigned edge, const std::uint32_t *source) noexcept
+{
+    if (!source || !edge || x >= frame_width || y >= frame_height)
+        return;
+    for (unsigned row = 0; row < edge && y + row < frame_height; row++)
+        for (unsigned col = 0; col < edge && x + col < frame_width; col++)
+            put_pixel_unchecked(pixels_, x + col, y + row,
+                                static_cast<Color>(source[row * edge + col]));
+}
+void Canvas::rounded_rectangle(unsigned x, unsigned y, unsigned width, unsigned height,
+                               unsigned radius, Color color) noexcept
+{
+    if (!width || !height)
+        return;
+    if (radius > width / 2)
+        radius = width / 2;
+    if (radius > height / 2)
+        radius = height / 2;
+    rectangle(x + radius, y, width - 2 * radius, height, color);
+    rectangle(x, y + radius, width, height - 2 * radius, color);
+    if (radius)
+    {
+        circle(x + radius, y + radius, radius, color);
+        circle(x + width - radius - 1, y + radius, radius, color);
+        circle(x + radius, y + height - radius - 1, radius, color);
+        circle(x + width - radius - 1, y + height - radius - 1, radius, color);
+    }
 }
 
 void Canvas::clear(Color color) noexcept

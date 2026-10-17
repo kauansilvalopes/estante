@@ -2,52 +2,36 @@
 
 Organizador de biblioteca que roda no proprio PS5, com navegacao pelo controle.
 
-**Prototipo em desenvolvimento.** Compilado e enviado a um PS5 com firmware 11.60;
-o registro do titulo foi confirmado, mas abertura, controle, persistencia e lancamento
-de jogos ainda aguardam validacao no console. Nao e uma versao estavel.
+**Versão 0.3 em desenvolvimento.** Nova experiência nativa com quatro áreas:
+Início, Biblioteca, Coleções e Ajustes. A versão anterior foi executada no PS5 do autor;
+esta reformulação precisa de validação de uso no console, além dos testes host.
 
-## Interface (v0.2.0)
+## Nova experiência
 
-Grade de oito jogos com capas obtidas da API local do Elf Arsenal, foco destacado,
-cache em memoria e carregamento em segundo plano. PNG/JPEG sao reduzidos para 316 px
-sem cortar a imagem; um card com titulo e identificador aparece quando nao ha imagem
-(por exemplo, jogos de PS2). Nenhuma capa e publicada no repositorio.
+- Início com jogo em destaque, últimas escolhas feitas no Estante, jogos fixados e mosaicos de coleções.
+- Biblioteca completa com busca sem distinção de acentos, filtros e ordenação.
+- Coleções e subcoleções, seleção múltipla, favoritos, ocultos e classificação PS2/PS4/PS5.
+- Coleções automáticas por plataforma, progresso manual e favoritos. Crie em Todos os jogos, sem busca textual ativa.
+- Progresso manual: Quero jogar, Em andamento e Concluído. Não representa troféus ou leitura de saves.
+- Fonte Noto Sans com minúsculas e acentos; opção de texto maior e modo gravação persistentes.
+- Capas locais PNG/JPEG, carregadas em segundo plano, com cache limitado. Nenhuma capa de jogo acompanha o projeto.
+- Consulta ao estado do console antes de abrir um título e tentativa de confirmação posterior.
+- Migração dos metadados v1 com cópia anterior preservada; exportação e restauração local.
 
-- **Capas grandes** de ponta a ponta no card, com o cabecalho tingido pela cor da capa focada.
-- **Contagem de titulos** em cada colecao da barra lateral.
-- **Selo de plataforma** (PS2, PS4, PS5) so nas visoes mistas, com cor por plataforma.
-- **Modo gravacao** (desligado ao abrir, para mostrar os comandos): esconde mensagens de status e a
-  linha de comandos, deixando so a biblioteca. Alterne com **R3** ou pelo menu Organizar.
-- **Ocultar titulos:** a acao "Ocultar ou mostrar titulo" move o jogo para a colecao
-  OCULTOS; ele deixa de aparecer nas outras visoes e pode ser mostrado de novo.
-- **Redesenho so quando algo muda**, porque o renderizador por CPU e lento.
-- Fonte bitmap so com maiusculas e sem acentos; esse e um limite conhecido.
+As pastas existem dentro do Estante; os jogos não são movidos nem reorganizados no menu oficial.
+PS2 instalado como PS4 exige classificação manual. O app roda no PS5 sem servidor no PC.
+Recentes são pedidos feitos pelo Estante após a consulta inicial, não histórico global nem prova de abertura.
 
-A direcao visual esta registrada em [DESIGN.md](DESIGN.md).
-
-Para inspecionar o desenho real da interface com dados ficticios no computador:
-`bash tools/preview-estante.sh` (gera `.local/grid-preview.png`). Isso e uma ferramenta
-de desenvolvimento, nao a interface usada pelo jogador.
-
-Teste adicional do decodificador:
+Veja [ESTANTE.md](ESTANTE.md) para controles, dados, instalação e limites e
+[DESIGN.md](DESIGN.md) para as decisões de UX.
 
 ```sh
-clang-18 -g -fsanitize=address,undefined tests/test_cover_decode.c src/cover_decode.c -lm -o build/tests/test-cover
-build/tests/test-cover
+bash tools/test-estante.sh
+bash tools/preview-estante.sh
 ```
 
-## Recursos implementados
-
-- Pastas e subpastas dentro do aplicativo (ate 32).
-- Favoritos, selecao de varios titulos e classificacao PS2, PS4, PS5 ou outros.
-- Teclado na tela para nomes de pastas.
-- Organizacao salva localmente em `/download0/estante.json`, com backup.
-- Catalogo e pedidos de lancamento pela API local do Elf Arsenal, porta 6969.
-
-As pastas organizam referencias aos jogos; nao alteram o menu oficial nem movem os jogos.
-Ports de PS2 instalados como PS4 precisam ser classificados manualmente.
-O PC e usado para compilar e enviar; nao hospeda a interface do aplicativo.
-O catalogo publicado esta vazio: cada console carrega seus titulos pela API local.
+Os previews `.local/preview-*.png` usam o renderizador real com dados e artes fictícias.
+Servem apenas à validação de desenvolvimento; não são um aplicativo para o PC.
 
 ## Compilar (Linux / WSL Ubuntu)
 
@@ -59,7 +43,7 @@ make
 
 O build baixa dependencias publicas fixadas por versao e hash. Saidas:
 `dist/PPSA99841/` e `dist/PPSA99841.zip`.
-O formato atual e aplicativo em pasta para ShadowMount, nao PKG.
+Saída em pasta para ShadowMount; também pode ser empacotada como imagem `.ffpfsc`. Não é PKG.
 
 ## Enviar ao PS5
 

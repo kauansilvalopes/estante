@@ -124,3 +124,13 @@ The BlackBear icon, selection artwork, and default selection track
 is titled `Night Drive`.
 
 No proprietary runtime module, encryption key, or game file is included.
+
+## Noto Sans
+
+`third_party/noto/NotoSans.ttf` and the generated `assets/fonts/noto.atlas` use
+Noto Sans under the SIL Open Font License 1.1. The license is included in both
+directories, including the application assets. Downloaded on 2026-10-17 from
+https://github.com/google/fonts/tree/main/ofl/notosans . Source font SHA-256:
+`bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d`.
+Regenerate with `python3 tools/build-font-atlas.py` and Pillow 12.1.1.
+The committed atlas lets the normal native build run without Pillow.
