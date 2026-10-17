@@ -116,9 +116,6 @@ char requested_cover[10]{}, launch_id[10]{};
 // normal titles. The id is made up ("PS2" + hash) because an image has no title id.
 char ps2_file[max_games][144]{};
 constexpr const char *ps2_games_dir = "/data/PCSX2/games";
-// First press on a PS2 image writes the start request ("armed"); a second press on the same image asks
-// Elf Arsenal to open PS5SX2. The player can also open PS5SX2 from the home screen after the first press.
-char ps2_armed_id[10]{};
 // Boot serial of each PS2 image ("SLUS-20624"), read once from the start of the image and remembered in
 // /download0/ps2-serials.txt. state: 0 not read yet, 1 serial known, 2 no serial. The serial names the
 // cover PS5SX2 already downloaded to /data/PCSX2/covers.
@@ -1002,39 +999,15 @@ void poll_work()
         start_request(kind, pending_path);
     }
 }
-// PS5SX2 reads /data/PCSX2/logs/disc-launch.txt when it starts: first line is the image to play.
-void queue_ps2_launch(int idx)
+// A PS2 image is not a title the console can start: pressing X opens PS5SX2 itself and the game is picked
+// on its shelf.
+void queue_ps2_launch()
 {
-    if (ps2_armed_id[0] && !std::strcmp(ps2_armed_id, games[idx].id))
-    {
-        // Second press: the request is already written, only PS5SX2 has to be opened.
-        ps2_armed_id[0] = 0;
-        std::snprintf(launch_id, 10, "PPSA99203");
-        launch_pending = true;
-        verify_at = 0;
-        msg("Verificando o console…");
-        start_request(4, "/api/state");
-        return;
-    }
-    char request[200], file[160];
-    std::snprintf(file, sizeof file, "/data/PCSX2/logs/disc-launch.txt");
-    std::snprintf(request, sizeof request, "%s/%s\n", ps2_games_dir, ps2_file[idx]);
-    if (!write_file(file, request))
-    {
-        msg("Não consegui gravar o pedido para o PS5SX2.");
-        return;
-    }
-    Library nextdb = db;
-    auto *m = metadata(nextdb, games[idx].id);
-    auto now = std::time(nullptr);
-    if (m && now > 0)
-    {
-        m->lastChosen = static_cast<std::uint64_t>(now);
-        if (storage_ok && persist(nextdb))
-            rebuild();
-    }
-    std::snprintf(ps2_armed_id, sizeof ps2_armed_id, "%s", games[idx].id);
-    msg("Jogo carregado. Aperte × de novo para abrir o PS5SX2 (ou abra pela tela inicial).");
+    std::snprintf(launch_id, 10, "PPSA99203");
+    launch_pending = true;
+    verify_at = 0;
+    msg("Verificando o console…");
+    start_request(4, "/api/state");
 }
 void queue_launch(int idx)
 {
@@ -1042,7 +1015,7 @@ void queue_launch(int idx)
         return;
     if (is_ps2_id(games[idx].id) && ps2_file[idx][0])
     {
-        queue_ps2_launch(idx);
+        queue_ps2_launch();
         return;
     }
     std::snprintf(launch_id, 10, "%s", games[idx].id);
