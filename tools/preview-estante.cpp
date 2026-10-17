@@ -94,6 +94,7 @@ int main(int argc, char **argv)
                     0xff000000u | ((bb & 255) << 16) | ((gg & 255) << 8) | (rr & 255);
             }
         art.tint = average_pixels(art.pixels);
+        build_thumb(art.thumb, art.pixels);
         auto *m = metadata(db, games[i].id);
         m->lastChosen = 1000 - i;
         m->folders = std::uint32_t(1) << (i % 3);
@@ -167,6 +168,11 @@ int main(int argc, char **argv)
     home_cursor = 5;
     rebuild();
     assert(home_cursor == 5);
+    assert(stick_directions(0, 128) == LEFT && stick_directions(255, 128) == RIGHT &&
+           stick_directions(128, 0) == UP && stick_directions(128, 255) == DOWN &&
+           stick_directions(128, 128) == 0 && stick_directions(150, 140) == 0);
+    input(DOWN);
+    assert(home_row == 0);
     home_cursor = 0;
     std::memset(played_last, 0, sizeof played_last);
     activity_now = 1800000000ull;

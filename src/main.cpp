@@ -62,7 +62,8 @@ constexpr Color bg = static_cast<Color>(0xff141110), panel = static_cast<Color>(
 constexpr std::uint32_t UP = 0x10, RIGHT = 0x20, DOWN = 0x40, LEFT = 0x80, L1 = 0x400, R1 = 0x800,
                         TRIANGLE = 0x1000, CIRCLE = 0x2000, CROSS = 0x4000, SQUARE = 0x8000,
                         OPTIONS = 0x8, R3 = 0x4, TOUCH = 0x100000;
-constexpr int cover_edge = 316;
+constexpr int thumb_edge = 264; // library card size: pre-scaled once when the cover loads
+constexpr int cover_edge = 512; // native icon0 size; downscaled with a box filter when drawn
 Library db{};
 Game games[max_games]{};
 int count = 0;
@@ -92,6 +93,7 @@ struct Cover
     bool ready;
     std::uint64_t age;
     std::uint32_t tint;
+    std::uint32_t thumb[thumb_edge * thumb_edge];
     std::uint32_t pixels[cover_edge * cover_edge];
 };
 Cover covers[32]{};
@@ -360,11 +362,40 @@ Cover *find_cover(const char *id)
             return &cover;
     return nullptr;
 }
+void build_thumb(std::uint32_t *out, const std::uint32_t *pixels)
+{
+    for (unsigned y = 0; y < thumb_edge; y++)
+    {
+        const unsigned sy0 = y * cover_edge / thumb_edge;
+        unsigned sy1 = (y + 1) * cover_edge / thumb_edge;
+        if (sy1 <= sy0)
+            sy1 = sy0 + 1;
+        for (unsigned x = 0; x < thumb_edge; x++)
+        {
+            const unsigned sx0 = x * cover_edge / thumb_edge;
+            unsigned sx1 = (x + 1) * cover_edge / thumb_edge;
+            if (sx1 <= sx0)
+                sx1 = sx0 + 1;
+            std::uint32_t r = 0, g = 0, b = 0, n = 0;
+            for (unsigned sy = sy0; sy < sy1; sy++)
+                for (unsigned sx = sx0; sx < sx1; sx++)
+                {
+                    const std::uint32_t p = pixels[sy * cover_edge + sx];
+                    r += p & 255;
+                    g += (p >> 8) & 255;
+                    b += (p >> 16) & 255;
+                    n++;
+                }
+            out[y * thumb_edge + x] =
+                0xff000000u | ((b / n) << 16) | ((g / n) << 8) | (r / n);
+        }
+    }
+}
 std::uint32_t average_pixels(const std::uint32_t *pixels)
 {
     std::uint32_t r = 0, g = 0, b = 0, n = 0;
-    for (unsigned y = 0; y < cover_edge; y += 9)
-        for (unsigned x = 0; x < cover_edge; x += 9)
+    for (unsigned y = 0; y < cover_edge; y += 16)
+        for (unsigned x = 0; x < cover_edge; x += 16)
         {
             const std::uint32_t p = pixels[y * cover_edge + x];
             r += p & 255;
@@ -643,6 +674,7 @@ void poll_work()
             dest.ready = true;
             dest.age = ++cover_clock;
             dest.tint = average_pixels(decoded_cover);
+            build_thumb(dest.thumb, dest.pixels);
         }
         else if (failed_cover_count < max_games)
             std::snprintf(failed_covers[failed_cover_count++], 10, "%s", requested_cover);
@@ -737,6 +769,17 @@ void queue_launch(int idx)
     msg("Verificando o console…");
     start_request(4, "/api/state");
 }
+// Left stick as virtual d-pad presses: dominant axis only, with a dead zone around the centre.
+std::uint32_t stick_directions(unsigned x, unsigned y)
+{
+    const int dx = static_cast<int>(x) - 128, dy = static_cast<int>(y) - 128;
+    const int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
+    if (ax < 56 && ay < 56)
+        return 0;
+    if (ax >= ay)
+        return dx < 0 ? LEFT : RIGHT;
+    return dy < 0 ? UP : DOWN;
+}
 std::uint32_t buttons()
 {
     auto now = sceKernelGetProcessTime();
@@ -765,8 +808,10 @@ std::uint32_t buttons()
     std::uint32_t pressed = 0;
     for (int i = 0; i < n; i++)
     {
-        pressed |= samples[i].buttons & ~held;
-        held = samples[i].buttons;
+        const std::uint32_t current =
+            samples[i].buttons | stick_directions(samples[i].analog[0], samples[i].analog[1]);
+        pressed |= current & ~held;
+        held = current;
     }
     if (pressed & (UP | DOWN | LEFT | RIGHT))
         repeat_at = now + 450000;
@@ -1436,10 +1481,7 @@ void input(std::uint32_t b)
             open_library(0);
             return;
         }
-        if (b & UP)
-            home_row = 0;
-        if (b & DOWN)
-            home_row = 1;
+        home_row = 0; // the collections row was removed from Inicio; R1 opens Biblioteca
         if (home_row == 0)
         {
             if ((b & LEFT) && home_cursor > 0)
@@ -1671,7 +1713,10 @@ void artwork(Canvas &c, int idx, unsigned x, unsigned y, unsigned edge, bool foc
     if (cover)
     {
         const_cast<Cover *>(cover)->age = ++cover_clock;
-        c.rounded_picture(x, y, edge, edge, radius, cover_edge, cover->pixels);
+        if (edge == thumb_edge)
+            c.rounded_picture(x, y, edge, edge, radius, thumb_edge, cover->thumb);
+        else
+            c.rounded_picture(x, y, edge, edge, radius, cover_edge, cover->pixels);
         return;
     }
     c.rounded_rectangle(x, y, edge, edge, radius, shade(38, 48, 59));
@@ -1818,17 +1863,17 @@ void draw_home(Canvas &c)
             if (i < 0 || i >= home_count)
                 continue;
             const int distance = offset < 0 ? -offset : offset;
-            const unsigned edge = distance == 0 ? 420 : distance == 1 ? 300 : 220;
-            const unsigned x = offset == -2   ? 158
-                               : offset == -1 ? 414
-                               : offset == 0  ? 750
-                               : offset == 1  ? 1206
-                                              : 1542;
-            artwork(c, home_games[i], x, 442 - edge / 2, edge, home_row == 0 && offset == 0);
+            const unsigned edge = distance == 0 ? 470 : distance == 1 ? 340 : 250;
+            const unsigned x = offset == -2   ? 70
+                               : offset == -1 ? 350
+                               : offset == 0  ? 725
+                               : offset == 1  ? 1230
+                                              : 1600;
+            artwork(c, home_games[i], x, 500 - edge / 2, edge, home_row == 0 && offset == 0);
         }
         const int idx = home_games[home_cursor];
         const auto *m = meta(idx);
-        centered(c, 686, games[idx].name, 44, white, 1500);
+        centered(c, 772, games[idx].name, 44, white, 1500);
         char detail[220], ago[48], played[48];
         format_ago(played_last[idx], ago, sizeof ago);
         format_playtime(played_seconds[idx], played, sizeof played);
@@ -1841,34 +1886,12 @@ void draw_home(Canvas &c)
                       m && m->pinned ? "  ·  Fixado" : "", m && m->status ? "  ·  " : "",
                       m && m->status ? statuses[m->status] : "", ago[0] ? "  ·  " : "", ago,
                       played[0] ? "  ·  " : "", played);
-        centered(c, 752, detail, 28, muted, 1500);
+        centered(c, 840, detail, 28, muted, 1500);
     }
     else
     {
         text(c, 78, 324, "Sua biblioteca está vazia", 44, white, 1450);
         text(c, 80, 400, "Atualize os jogos em Biblioteca > Options.", 28, muted, 1450);
-    }
-    text(c, 78, 844, "Coleções", 28, muted, 1100);
-    int cs = (home_folder_cursor / 4) * 4;
-    for (int i = 0; i < 4 && cs + i <= home_folder_count; i++)
-    {
-        unsigned fx = 78 + i * 447;
-        bool focus = home_row == 1 && cs + i == home_folder_cursor;
-        c.shadow(fx, 902, 422, 86, focus ? 20 : 12, focus ? 140 : 90);
-        if (focus)
-            c.rounded_rectangle(fx - 4, 898, 430, 94, 17, white);
-        c.rounded_rectangle(fx, 902, 422, 86, 14, panel);
-        if (cs + i < home_folder_count)
-        {
-            int slot = home_folders[cs + i];
-            char n[20];
-            std::snprintf(n, sizeof n, "%d", collection_size(slot));
-            artwork(c, first_game_in(slot), fx + 12, 914, 62);
-            text(c, fx + 90, 923, db.folders[slot].name, 28, white, 250);
-            text(c, fx + 358, 925, n, 24, muted, 52);
-        }
-        else
-            text(c, fx + 22, 923, "Ver biblioteca  >", 28, white, 375);
     }
 }
 void draw_library(Canvas &c)
@@ -2156,7 +2179,7 @@ void request_visible_cover()
             add(filtered[i]);
     }
     // Collection mosaics use the same bounded queue and never block navigation.
-    if (screen == 0 || screen == 2)
+    if (screen == 2)
     {
         int folders[6], nf = 0;
         if (screen == 0)

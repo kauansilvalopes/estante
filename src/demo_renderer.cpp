@@ -626,6 +626,7 @@ void Canvas::rounded_picture(unsigned x, unsigned y, unsigned width, unsigned he
         radius = width / 2;
     if (radius > height / 2)
         radius = height / 2;
+    const bool one_to_one = source_edge == width && width == height;
     for (unsigned yy = 0; yy < height && y + yy < frame_height; yy++)
     {
         const unsigned edge_distance = yy < height - 1 - yy ? yy : height - 1 - yy;
@@ -635,12 +636,44 @@ void Canvas::rounded_picture(unsigned x, unsigned y, unsigned width, unsigned he
             const unsigned d = radius - edge_distance;
             inset = radius - integer_sqrt(radius * radius - d * d);
         }
-        const std::size_t source_row = static_cast<std::size_t>(yy) * source_edge / height;
+        if (one_to_one)
+        {
+            for (unsigned xx = inset; xx + inset < width && x + xx < frame_width; xx++)
+                put_pixel_unchecked(pixels_, x + xx, y + yy,
+                                    static_cast<Color>(source[static_cast<std::size_t>(yy) * width + xx]));
+            continue;
+        }
+        // Box filter over the source area that maps to this row (at most 3 taps per axis).
+        const unsigned sy0 = static_cast<unsigned>(static_cast<std::size_t>(yy) * source_edge / height);
+        unsigned sy1 = static_cast<unsigned>(static_cast<std::size_t>(yy + 1) * source_edge / height);
+        if (sy1 <= sy0)
+            sy1 = sy0 + 1;
+        const unsigned span_y = sy1 - sy0, step_y = (span_y + 2) / 3;
         for (unsigned xx = inset; xx + inset < width && x + xx < frame_width; xx++)
-            put_pixel_unchecked(
-                pixels_, x + xx, y + yy,
-                static_cast<Color>(source[source_row * source_edge +
-                                          static_cast<std::size_t>(xx) * source_edge / width]));
+        {
+            const unsigned sx0 =
+                static_cast<unsigned>(static_cast<std::size_t>(xx) * source_edge / width);
+            unsigned sx1 =
+                static_cast<unsigned>(static_cast<std::size_t>(xx + 1) * source_edge / width);
+            if (sx1 <= sx0)
+                sx1 = sx0 + 1;
+            const unsigned step_x = (sx1 - sx0 + 2) / 3;
+            std::uint32_t r = 0, g = 0, b = 0, n = 0;
+            for (unsigned sy = sy0; sy < sy1 && sy < source_edge; sy += step_y)
+                for (unsigned sx = sx0; sx < sx1 && sx < source_edge; sx += step_x)
+                {
+                    const std::uint32_t p = source[static_cast<std::size_t>(sy) * source_edge + sx];
+                    r += p & 255U;
+                    g += (p >> 8) & 255U;
+                    b += (p >> 16) & 255U;
+                    ++n;
+                }
+            if (!n)
+                continue;
+            put_pixel_unchecked(pixels_, x + xx, y + yy,
+                                static_cast<Color>(0xff000000u | ((b / n) << 16) | ((g / n) << 8) |
+                                                   (r / n)));
+        }
     }
 }
 
