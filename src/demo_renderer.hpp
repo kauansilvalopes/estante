@@ -54,6 +54,15 @@ class Canvas final
     void picture(unsigned x, unsigned y, unsigned width, unsigned height, unsigned source_edge,
                  const std::uint32_t *pixels) noexcept;
     void image(unsigned x, unsigned y, unsigned edge, const std::uint32_t *pixels) noexcept;
+    // Vertical gradient, translucent fill, rounded scaled picture and soft shadow (CPU, bounded).
+    void gradient(unsigned x, unsigned y, unsigned width, unsigned height, Color top,
+                  Color bottom) noexcept;
+    void blend(unsigned x, unsigned y, unsigned width, unsigned height, Color color,
+               unsigned alpha) noexcept;
+    void rounded_picture(unsigned x, unsigned y, unsigned width, unsigned height, unsigned radius,
+                         unsigned source_edge, const std::uint32_t *pixels) noexcept;
+    void shadow(unsigned x, unsigned y, unsigned width, unsigned height, unsigned spread,
+                unsigned alpha) noexcept;
     void rounded_rectangle(unsigned x, unsigned y, unsigned width, unsigned height, unsigned radius,
                            Color color) noexcept;
     void rectangle(unsigned x, unsigned y, unsigned width, unsigned height, Color color) noexcept;

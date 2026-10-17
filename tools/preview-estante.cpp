@@ -92,6 +92,7 @@ int main(int argc, char **argv)
                 art.pixels[y * cover_edge + x] =
                     0xff000000u | ((bb & 255) << 16) | ((gg & 255) << 8) | (rr & 255);
             }
+        art.tint = average_pixels(art.pixels);
         auto *m = metadata(db, games[i].id);
         m->lastChosen = 1000 - i;
         m->folders = std::uint32_t(1) << (i % 3);
@@ -122,6 +123,10 @@ int main(int argc, char **argv)
     input(LEFT);
     assert(nav_focus);
     input(RIGHT);
+    assert(!nav_focus);
+    input(TOUCH);
+    assert(nav_focus);
+    input(TOUCH);
     assert(!nav_focus);
     input(L1);
     assert(screen == 0);
@@ -167,6 +172,11 @@ int main(int argc, char **argv)
     {
         screen = 1;
         selected[2] = true;
+    }
+    if (!std::strcmp(mode, "sidebar"))
+    {
+        screen = 1;
+        nav_focus = true;
     }
     if (!std::strcmp(mode, "collections"))
         screen = 2;

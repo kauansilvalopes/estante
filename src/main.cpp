@@ -61,7 +61,7 @@ constexpr Color bg = static_cast<Color>(0xff141110), panel = static_cast<Color>(
                 white = Color::white;
 constexpr std::uint32_t UP = 0x10, RIGHT = 0x20, DOWN = 0x40, LEFT = 0x80, L1 = 0x400, R1 = 0x800,
                         TRIANGLE = 0x1000, CIRCLE = 0x2000, CROSS = 0x4000, SQUARE = 0x8000,
-                        OPTIONS = 0x8, R3 = 0x4;
+                        OPTIONS = 0x8, R3 = 0x4, TOUCH = 0x100000;
 constexpr int cover_edge = 316;
 Library db{};
 Game games[max_games]{};
@@ -91,6 +91,7 @@ struct Cover
     char id[10];
     bool ready;
     std::uint64_t age;
+    std::uint32_t tint;
     std::uint32_t pixels[cover_edge * cover_edge];
 };
 Cover covers[32]{};
@@ -348,6 +349,22 @@ Cover *find_cover(const char *id)
             return &cover;
     return nullptr;
 }
+std::uint32_t average_pixels(const std::uint32_t *pixels)
+{
+    std::uint32_t r = 0, g = 0, b = 0, n = 0;
+    for (unsigned y = 0; y < cover_edge; y += 9)
+        for (unsigned x = 0; x < cover_edge; x += 9)
+        {
+            const std::uint32_t p = pixels[y * cover_edge + x];
+            r += p & 255;
+            g += (p >> 8) & 255;
+            b += (p >> 16) & 255;
+            n++;
+        }
+    if (!n)
+        return 0xff272220u;
+    return 0xff000000u | ((b / n) << 16) | ((g / n) << 8) | (r / n);
+}
 bool cached_cover(const char *path, bool header)
 {
     FILE *f = std::fopen(path, "rb");
@@ -563,6 +580,7 @@ void poll_work()
             std::memcpy(dest.pixels, decoded_cover, sizeof decoded_cover);
             dest.ready = true;
             dest.age = ++cover_clock;
+            dest.tint = average_pixels(decoded_cover);
         }
         else if (failed_cover_count < max_games)
             std::snprintf(failed_covers[failed_cover_count++], 10, "%s", requested_cover);
@@ -1390,6 +1408,11 @@ void input(std::uint32_t b)
     }
     if (screen == 1)
     {
+        if (b & TOUCH)
+        {
+            nav_focus = !nav_focus;
+            return;
+        }
         if (b & OPTIONS)
         {
             open_menu(1);
@@ -1552,21 +1575,41 @@ int collection_size(int slot)
     }
     return n;
 }
+Color mix_color(Color a, Color b, unsigned weight_a)
+{
+    const auto ca = static_cast<std::uint32_t>(a), cb = static_cast<std::uint32_t>(b);
+    std::uint32_t out = 0xff000000u;
+    for (unsigned shift = 0; shift < 24; shift += 8)
+    {
+        const std::uint32_t va = (ca >> shift) & 255U, vb = (cb >> shift) & 255U;
+        out |= ((va * weight_a + vb * (255U - weight_a)) / 255U) << shift;
+    }
+    return static_cast<Color>(out);
+}
+Color brighten(Color color)
+{
+    return mix_color(color, white, 150);
+}
 void artwork(Canvas &c, int idx, unsigned x, unsigned y, unsigned edge, bool focus = false)
 {
+    const unsigned radius = edge > 200 ? 20 : edge > 100 ? 14 : 8;
+    const Cover *cover = idx >= 0 && idx < count ? find_cover(games[idx].id) : nullptr;
+    if (edge > 90)
+        c.shadow(x, y, edge, edge, focus ? 30 : 18, focus ? 170 : 120);
     if (focus)
-        c.rounded_rectangle(x - 5, y - 5, edge + 10, edge + 10, 14, accent);
-    if (idx >= 0 && idx < count)
     {
-        auto *cover = find_cover(games[idx].id);
-        if (cover)
-        {
-            cover->age = ++cover_clock;
-            c.picture(x, y, edge, edge, cover_edge, cover->pixels);
-            return;
-        }
+        const Color glow = cover ? mix_color(brighten(static_cast<Color>(cover->tint)), bg, 150)
+                                 : mix_color(accent, bg, 120);
+        c.rounded_rectangle(x - 11, y - 11, edge + 22, edge + 22, radius + 11, glow);
+        c.rounded_rectangle(x - 4, y - 4, edge + 8, edge + 8, radius + 4, white);
     }
-    c.rounded_rectangle(x, y, edge, edge, 10, shade(38, 48, 59));
+    if (cover)
+    {
+        const_cast<Cover *>(cover)->age = ++cover_clock;
+        c.rounded_picture(x, y, edge, edge, radius, cover_edge, cover->pixels);
+        return;
+    }
+    c.rounded_rectangle(x, y, edge, edge, radius, shade(38, 48, 59));
     unsigned mx = x + edge / 3, my = y + edge / 3, w = edge / 3;
     c.rectangle(mx, my, w, 4, muted);
     c.rectangle(mx, my + edge / 8, w * 3 / 4, 4, muted);
@@ -1574,12 +1617,32 @@ void artwork(Canvas &c, int idx, unsigned x, unsigned y, unsigned edge, bool foc
     if (edge > 180 && idx >= 0)
         text(c, x + 20, y + edge - 55, games[idx].id, 24, muted, edge - 40);
 }
+const Cover *focus_cover()
+{
+    int idx = -1;
+    if (screen == 0 && home_row == 0 && home_count)
+        idx = home_games[home_cursor];
+    else if (screen == 1 && !nav_focus && filtered_count)
+        idx = filtered[cursor];
+    return idx >= 0 && idx < count ? find_cover(games[idx].id) : nullptr;
+}
+int first_game_in(int slot)
+{
+    for (int i = 0; i < count; i++)
+    {
+        auto *m = meta(i);
+        if ((!m || !m->hidden) && collection_contains(db, games[i], slot, true))
+            return i;
+    }
+    return -1;
+}
 void collection_card(Canvas &c, int slot, unsigned x, unsigned y, unsigned width, unsigned height,
                      bool focus)
 {
+    c.shadow(x, y, width, height, focus ? 26 : 16, focus ? 150 : 100);
     if (focus)
-        c.rounded_rectangle(x - 4, y - 4, width + 8, height + 8, 16, accent);
-    c.rounded_rectangle(x, y, width, height, 12, panel);
+        c.rounded_rectangle(x - 4, y - 4, width + 8, height + 8, 18, white);
+    c.rounded_rectangle(x, y, width, height, 14, panel);
     int indices[4]{}, n = 0;
     for (int i = 0; i < count && n < 4; i++)
     {
@@ -1678,15 +1741,17 @@ void draw_home(Canvas &c)
     {
         unsigned fx = 78 + i * 447;
         bool focus = home_row == 1 && cs + i == home_folder_cursor;
+        c.shadow(fx, 902, 422, 86, focus ? 20 : 12, focus ? 140 : 90);
         if (focus)
-            c.rounded_rectangle(fx - 4, 898, 430, 94, 13, white);
-        c.rounded_rectangle(fx, 902, 422, 86, 9, panel);
+            c.rounded_rectangle(fx - 4, 898, 430, 94, 17, white);
+        c.rounded_rectangle(fx, 902, 422, 86, 14, panel);
         if (cs + i < home_folder_count)
         {
             int slot = home_folders[cs + i];
             char n[20];
             std::snprintf(n, sizeof n, "%d", collection_size(slot));
-            text(c, fx + 22, 923, db.folders[slot].name, 28, white, 330);
+            artwork(c, first_game_in(slot), fx + 12, 914, 62);
+            text(c, fx + 90, 923, db.folders[slot].name, 28, white, 250);
             text(c, fx + 358, 925, n, 24, muted, 52);
         }
         else
@@ -1702,14 +1767,21 @@ void draw_library(Canvas &c)
                   query.text[0] ? "  ·  " : "", query.text);
     text(c, 78, 207, detail, 24, muted, 1600);
     const int start = (cursor / 12) * 12;
-    for (int i = 0; i < 12 && start + i < filtered_count; i++)
-    {
-        const int pos = start + i, idx = filtered[pos];
-        const unsigned x = 80 + (i % 6) * 296, y = 270 + (i / 6) * 314;
-        artwork(c, idx, x, y, 264, !nav_focus && cursor == pos);
-        if (selected[idx])
-            pill(c, x + 172, y + 12, 78, "OK", true);
-    }
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = 0; i < 12 && start + i < filtered_count; i++)
+        {
+            const int pos = start + i, idx = filtered[pos];
+            const bool current = !nav_focus && cursor == pos;
+            if (current != (pass == 1))
+                continue;
+            const unsigned x = 80 + (i % 6) * 296, y = 270 + (i / 6) * 314;
+            if (current)
+                artwork(c, idx, x - 10, y - 10, 284, true);
+            else
+                artwork(c, idx, x, y, 264, false);
+            if (selected[idx])
+                pill(c, current ? x + 182 : x + 172, current ? y + 2 : y + 12, 78, "OK", true);
+        }
     if (filtered_count)
         text(c, 78, 908, games[filtered[cursor]].name, 32, white, 1470);
     else
@@ -2083,6 +2155,11 @@ void draw(Canvas &c) noexcept
         stable_frames = 0;
     }
     c.clear(bg);
+    if (const Cover *tinted = focus_cover())
+    {
+        const Color top = mix_color(static_cast<Color>(tinted->tint), bg, 92);
+        c.gradient(0, 0, 1920, 700, top, bg);
+    }
     draw_top(c);
     if (screen == 0)
         draw_home(c);
@@ -2094,20 +2171,24 @@ void draw(Canvas &c) noexcept
         draw_settings(c);
     if (!record_mode)
     {
-        text(c, 78, 1031, "L1 / R1  Navegar", 24, muted, 300);
-        text(c, 420, 1031,
-             screen == 0 && home_row == 0 ? "×  Jogar"
-             : screen == 1 ? (editing_collection >= 0 ? "×  Selecionar" : "×  Jogar")
-                           : "×  Abrir",
-             24, white, 280);
-        text(c, 710, 1031, "△  Organizar", 24, muted, 300);
-        text(c, 1020, 1031,
-             screen == 1   ? "□  Selecionar"
-             : screen == 0 ? "□  Buscar"
-                           : "○  Voltar",
-             24, muted, 300);
-        text(c, 1370, 1031, screen == 0 ? "Options  Biblioteca" : "Options  Opções", 24, muted,
-             460);
+        if (screen == 1)
+        {
+            text(c, 78, 1031, "L1 / R1  Abas", 24, muted, 250);
+            text(c, 360, 1031, editing_collection >= 0 ? "×  Selecionar" : "×  Jogar", 24, white, 250);
+            text(c, 620, 1031, "△  Organizar", 24, muted, 250);
+            text(c, 900, 1031, "□  Selecionar", 24, muted, 250);
+            text(c, 1190, 1031, "Touchpad  Filtros", 24, accent, 300);
+            text(c, 1540, 1031, "Options  Opções", 24, muted, 300);
+        }
+        else
+        {
+            text(c, 78, 1031, "L1 / R1  Navegar", 24, muted, 300);
+            text(c, 420, 1031, screen == 0 && home_row == 0 ? "×  Jogar" : "×  Abrir", 24, white, 280);
+            text(c, 710, 1031, "△  Organizar", 24, muted, 300);
+            text(c, 1020, 1031, screen == 0 ? "□  Buscar" : "○  Voltar", 24, muted, 300);
+            text(c, 1370, 1031, screen == 0 ? "Options  Biblioteca" : "Options  Opções", 24, muted,
+                 460);
+        }
         if (launch_pending || !storage_ok)
             text(c, 70, screen == 0 ? 804 : 935,
                  !storage_ok ? "Salvamento indisponível - confira o armazenamento do app."

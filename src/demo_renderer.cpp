@@ -515,6 +515,162 @@ void Canvas::image(unsigned x, unsigned y, unsigned edge, const std::uint32_t *s
             put_pixel_unchecked(pixels_, x + col, y + row,
                                 static_cast<Color>(source[row * edge + col]));
 }
+namespace
+{
+[[nodiscard]] std::uint32_t mix_channels(std::uint32_t a, std::uint32_t b, unsigned weight_a) noexcept
+{
+    std::uint32_t out = 0xff000000u;
+    for (unsigned shift = 0; shift < 24; shift += 8)
+    {
+        const std::uint32_t va = (a >> shift) & 255U, vb = (b >> shift) & 255U;
+        out |= ((va * weight_a + vb * (255U - weight_a)) / 255U) << shift;
+    }
+    return out;
+}
+
+[[nodiscard]] unsigned integer_sqrt(unsigned value) noexcept
+{
+    unsigned root = 0;
+    while ((root + 1) * (root + 1) <= value)
+        ++root;
+    return root;
+}
+} // namespace
+
+void Canvas::gradient(unsigned x, unsigned y, unsigned width, unsigned height, Color top,
+                      Color bottom) noexcept
+{
+    if (!width || !height || x >= frame_width || y >= frame_height)
+        return;
+    const unsigned right = width > frame_width - x ? frame_width : x + width;
+    const unsigned limit = height > frame_height - y ? frame_height : y + height;
+    for (unsigned row = y; row < limit; ++row)
+    {
+        const unsigned weight = 255U - (row - y) * 255U / (height > 1 ? height - 1 : 1);
+        const auto color = static_cast<Color>(mix_channels(static_cast<std::uint32_t>(top),
+                                                          static_cast<std::uint32_t>(bottom), weight));
+        for (unsigned column = x; column < right; ++column)
+            put_pixel_unchecked(pixels_, column, row, color);
+    }
+}
+
+void Canvas::blend(unsigned x, unsigned y, unsigned width, unsigned height, Color color,
+                   unsigned alpha) noexcept
+{
+    if (!width || !height || x >= frame_width || y >= frame_height || !alpha)
+        return;
+    if (alpha > 255)
+        alpha = 255;
+    const unsigned right = width > frame_width - x ? frame_width : x + width;
+    const unsigned limit = height > frame_height - y ? frame_height : y + height;
+    const auto source = static_cast<std::uint32_t>(color);
+    for (unsigned row = y; row < limit; ++row)
+        for (unsigned column = x; column < right; ++column)
+        {
+            auto *d = reinterpret_cast<std::uint32_t *>(reinterpret_cast<unsigned char *>(pixels_) +
+                                                        tiled_byte_offset(column, row));
+            *d = mix_channels(source, *d, alpha);
+        }
+}
+
+void Canvas::rounded_picture(unsigned x, unsigned y, unsigned width, unsigned height,
+                             unsigned radius, unsigned source_edge,
+                             const std::uint32_t *source) noexcept
+{
+    if (!source || !source_edge || !width || !height || x >= frame_width || y >= frame_height)
+        return;
+    if (radius > width / 2)
+        radius = width / 2;
+    if (radius > height / 2)
+        radius = height / 2;
+    for (unsigned yy = 0; yy < height && y + yy < frame_height; yy++)
+    {
+        const unsigned edge_distance = yy < height - 1 - yy ? yy : height - 1 - yy;
+        unsigned inset = 0;
+        if (edge_distance < radius)
+        {
+            const unsigned d = radius - edge_distance;
+            inset = radius - integer_sqrt(radius * radius - d * d);
+        }
+        const std::size_t source_row = static_cast<std::size_t>(yy) * source_edge / height;
+        for (unsigned xx = inset; xx + inset < width && x + xx < frame_width; xx++)
+            put_pixel_unchecked(
+                pixels_, x + xx, y + yy,
+                static_cast<Color>(source[source_row * source_edge +
+                                          static_cast<std::size_t>(xx) * source_edge / width]));
+    }
+}
+
+void Canvas::shadow(unsigned x, unsigned y, unsigned width, unsigned height, unsigned spread,
+                    unsigned alpha) noexcept
+{
+    // Soft shadow made of rounded rings that fade outward; shifted down, no overdraw under the card.
+    constexpr unsigned step = 3;
+    constexpr unsigned corner = 18;
+    if (!spread || !width || !height)
+        return;
+    const unsigned drop = spread / 3;
+    const auto black = static_cast<std::uint32_t>(0xff000000u);
+    // Horizontal span of a rounded rectangle on one row (empty when the row is outside it).
+    auto span = [](int rx, int ry, int rw, int rh, int radius, int row, int &from, int &to) -> bool
+    {
+        if (row < ry || row >= ry + rh)
+            return false;
+        if (radius > rw / 2)
+            radius = rw / 2;
+        if (radius > rh / 2)
+            radius = rh / 2;
+        const int top = row - ry, bottom = ry + rh - 1 - row;
+        const int edge = top < bottom ? top : bottom;
+        int inset = 0;
+        if (edge < radius)
+        {
+            const int d = radius - edge;
+            inset = radius - static_cast<int>(integer_sqrt(static_cast<unsigned>(radius * radius - d * d)));
+        }
+        from = rx + inset;
+        to = rx + rw - inset;
+        return to > from;
+    };
+    for (unsigned grow = spread; grow >= step; grow -= step)
+    {
+        const unsigned falloff = spread - grow + step; // 3 .. spread
+        const unsigned a = alpha * falloff * falloff / (spread * spread);
+        if (!a)
+            continue;
+        const int ox = static_cast<int>(x) - static_cast<int>(grow);
+        const int oy = static_cast<int>(y + drop) - static_cast<int>(grow);
+        const int ow = static_cast<int>(width + 2 * grow), oh = static_cast<int>(height + 2 * grow);
+        const int inner = static_cast<int>(grow) - static_cast<int>(step);
+        const int ix = static_cast<int>(x) - inner, iy = static_cast<int>(y + drop) - inner;
+        const int iw = static_cast<int>(width) + 2 * inner, ih = static_cast<int>(height) + 2 * inner;
+        for (int row = oy; row < oy + oh; ++row)
+        {
+            if (row < 0 || row >= static_cast<int>(frame_height))
+                continue;
+            int from = 0, to = 0;
+            if (!span(ox, oy, ow, oh, static_cast<int>(corner + grow), row, from, to))
+                continue;
+            int ifrom = 0, ito = 0;
+            const bool has_inner = span(ix, iy, iw, ih, static_cast<int>(corner + grow - step), row, ifrom, ito);
+            for (int column = from; column < to; ++column)
+            {
+                if (column < 0 || column >= static_cast<int>(frame_width))
+                    continue;
+                if (has_inner && column >= ifrom && column < ito)
+                {
+                    column = ito - 1;
+                    continue;
+                }
+                auto *d = reinterpret_cast<std::uint32_t *>(
+                    reinterpret_cast<unsigned char *>(pixels_) +
+                    tiled_byte_offset(static_cast<unsigned>(column), static_cast<unsigned>(row)));
+                *d = mix_channels(black, *d, a);
+            }
+        }
+    }
+}
+
 void Canvas::rounded_rectangle(unsigned x, unsigned y, unsigned width, unsigned height,
                                unsigned radius, Color color) noexcept
 {
