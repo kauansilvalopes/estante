@@ -93,12 +93,36 @@ const Meta *metadata(const Library &d, const char *id)
             return &d.games[i];
     return nullptr;
 }
+static bool starts_with(const char *id, const char *prefix)
+{
+    return !std::strncmp(id, prefix, std::strlen(prefix));
+}
+// Default platform from the title id when the user has not chosen one: retail PPSA/CUSA are PS5/PS4;
+// the 9xxxx range is used by homebrew apps; PS2/PSP serials are PS2; anything else is an app (1).
+static int default_platform(const char *id)
+{
+    const bool ps5 = starts_with(id, "PPSA"), ps4 = starts_with(id, "CUSA");
+    if (ps5 || ps4)
+    {
+        unsigned number = 0;
+        for (int i = 4; i < 9 && id[i] >= '0' && id[i] <= '9'; i++)
+            number = number * 10 + static_cast<unsigned>(id[i] - '0');
+        return number >= 90000 ? 1 : (ps5 ? 5 : 4);
+    }
+    static const char *const ps2_prefixes[] = {"SLUS", "SLES", "SCUS", "SCES", "SLPM", "SLPS", "SCPS",
+                                               "SCPM", "SCAJ", "SLKA", "SCKA", "ULUS", "ULES", "UCUS",
+                                               "UCES", "ULJM", "ULJS", "UCJS"};
+    for (const char *prefix : ps2_prefixes)
+        if (starts_with(id, prefix))
+            return 2;
+    return 1;
+}
 int platform(const Game &g, const Library &d)
 {
     const Meta *m = metadata(d, g.id);
     if (m && m->platform)
         return m->platform;
-    return !std::strncmp(g.id, "PPSA", 4) ? 5 : !std::strncmp(g.id, "CUSA", 4) ? 4 : 1;
+    return default_platform(g.id);
 }
 bool valid_library(const Library &d)
 {

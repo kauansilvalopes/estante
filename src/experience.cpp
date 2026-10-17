@@ -86,7 +86,7 @@ int select_games(const Library &d, const Game *games, int count, const Query &q,
         if ((q.view == 7) != hidden)
             continue;
         int p = platform(g, d);
-        bool match = q.view == 0 || q.view == 7 || (q.view == 1 && p == 2) ||
+        bool match = (q.view == 0 && (q.withApps || p != 1)) || q.view == 7 || (q.view == 1 && p == 2) ||
                      (q.view == 2 && p == 4) || (q.view == 3 && p == 5) ||
                      (q.view == 4 && p == 1) || (q.view == 5 && m && m->favorite) ||
                      (q.view == 6 && (!m || !m->folders)) || (q.view == 8 && m && m->status == 1) ||

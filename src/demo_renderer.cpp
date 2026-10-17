@@ -32,6 +32,7 @@ extern "C"
     int sceKernelSendNotificationRequest(std::uint32_t device, void *request, std::size_t size,
                                          int blocking);
     int sceKernelUsleep(std::uint32_t microseconds);
+    int sceKernelDebugOutText(int channel, const char *text);
     int sceSystemServiceHideSplashScreen();
     int open(const char *path, int flags, ...);
     long read(int descriptor, void *buffer, std::size_t size);
@@ -899,8 +900,16 @@ void read_asset_text(const char *path, std::span<char> destination,
     {
         std::size_t shown = 0;
         int stale = 0;
+        unsigned copies = 0;
         for (std::int64_t frame = 2;; ++frame)
         {
+            if (frame % 600 == 0)
+            {
+                char line[96];
+                std::snprintf(line, sizeof line, "ESTANTE: loop ativo frames=%lld copias=%u\n",
+                              static_cast<long long>(frame), copies);
+                (void)sceKernelDebugOutText(0, line);
+            }
             frame_drawn = false;
             Canvas canvas{scene};
             draw(canvas);
@@ -919,6 +928,13 @@ void read_asset_text(const char *path, std::span<char> destination,
                 }
                 shown = back;
                 --stale;
+                ++copies;
+            }
+            else
+            {
+                // Idle: keep presenting the same buffer every vblank, as the original loop did, so the
+                // system always sees a live video client (PS button, overlays, network dialogs).
+                (void)sceVideoOutSubmitFlip(video, static_cast<std::int32_t>(shown), 1, frame);
             }
             (void)sceVideoOutWaitVblank(video);
         }

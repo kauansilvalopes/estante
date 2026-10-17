@@ -70,7 +70,7 @@ int main(int argc, char **argv)
     count = 8;
     for (int i = 0; i < count; i++)
     {
-        std::snprintf(games[i].id, 10, "PPSA%05d", 90000 + i);
+        std::snprintf(games[i].id, 10, "PPSA%05d", 1000 + i);
         std::snprintf(games[i].name, 192, "%s", names[i]);
         auto &art = covers[i];
         std::snprintf(art.id, 10, "%s", games[i].id);
@@ -192,6 +192,18 @@ int main(int argc, char **argv)
     {
         screen = 1;
         selected[2] = true;
+    }
+    if (!std::strcmp(mode, "apps"))
+    {
+        std::snprintf(games[count].id, 10, "PPSA99203");
+        std::snprintf(games[count].name, 192, "PS5SX2");
+        std::snprintf(games[count + 1].id, 10, "PSPS69691");
+        std::snprintf(games[count + 1].name, 192, "Elf Arsenal");
+        count += 2;
+        rebuild();
+        query.view = 4;
+        rebuild();
+        screen = 1;
     }
     if (!std::strcmp(mode, "sidebar"))
     {

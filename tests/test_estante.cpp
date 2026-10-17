@@ -7,6 +7,10 @@ using namespace estante;
 int main(){
  Library d{};d.folders[0]={true,-1,"PS2"};d.folders[1]={true,0,"CORRIDA"};d.folders[2]={true,-1,"FAVORITOS"};
  auto* m=metadata(d,"CUSA12345");assert(m);m->platform=2;m->folders=7;m->favorite=true;
+ {Library empty{};
+  auto plat=[&](const char*id){Game g{};std::snprintf(g.id,10,"%s",id);return platform(g,empty);};
+  assert(plat("PPSA01575")==5&&plat("CUSA03507")==4&&plat("PPSA99203")==1&&plat("PPSA99841")==1);
+  assert(plat("SLUS20624")==2&&plat("SLES54510")==2&&plat("ULUS10564")==2&&plat("FAKE00000")==1&&plat("PSPS69691")==1);}
  assert(valid_library(d));Game g{"CUSA12345","Teste"};assert(platform(g,d)==2);
  char* s=write_library(d);assert(s);Library copy{};assert(read_library(s,copy));cJSON_free(s);
  assert(copy.games[0].folders==7&&copy.games[0].favorite&&!copy.games[0].hidden);

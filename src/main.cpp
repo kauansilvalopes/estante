@@ -116,9 +116,11 @@ std::uint64_t played_last[max_games]{}, activity_now = 0, activity_fetched = 0;
 std::uint32_t played_seconds[max_games]{};
 constexpr char keys[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -";
 constexpr int key_count = sizeof(keys) - 1;
-const char *views[] = {"Todos os jogos", "PlayStation 2", "PlayStation 4", "PlayStation 5",
-                       "Outros e apps",  "Favoritos",     "Sem coleção",   "Ocultos",
+const char *views[] = {"Todos os jogos", "PlayStation 2 e PSP", "PlayStation 4", "PlayStation 5",
+                       "Apps",           "Favoritos",     "Sem coleção",   "Ocultos",
                        "Quero jogar",    "Em andamento",  "Concluídos",    "Fixados"};
+// Order shown in the filter list (ids stay as they are): Apps right after "Todos os jogos".
+constexpr int view_order[12] = {0, 4, 3, 2, 1, 5, 6, 7, 8, 9, 10, 11};
 const char *statuses[] = {"Sem status", "Quero jogar", "Em andamento", "Concluído"};
 const char *sorts[] = {"Nome A-Z", "Plataforma", "Últimas escolhas", "Favoritos primeiro"};
 const Meta *meta(int idx)
@@ -288,6 +290,7 @@ void rebuild()
     if (home_count && home_cursor < home_count)
         std::snprintf(focused, 10, "%s", games[home_games[home_cursor]].id);
     Query homeQuery;
+    homeQuery.withApps = true;
     home_count = select_games(db, games, count, homeQuery, home_games);
     auto recency = [](int i)
     {
@@ -1221,6 +1224,14 @@ void action(Action a)
     }
     ui_version++;
 }
+void open_filters()
+{
+    nav_cursor = 0;
+    for (int i = 0; i < 12; i++)
+        if (view_order[i] == query.view)
+            nav_cursor = i;
+    nav_focus = true;
+}
 void input(std::uint32_t b)
 {
     if (!b)
@@ -1517,7 +1528,10 @@ void input(std::uint32_t b)
     {
         if (b & TOUCH)
         {
-            nav_focus = !nav_focus;
+            if (nav_focus)
+                nav_focus = false;
+            else
+                open_filters();
             return;
         }
         if (b & OPTIONS)
@@ -1542,7 +1556,7 @@ void input(std::uint32_t b)
             else if (nav_focus)
                 set_screen(0);
             else
-                nav_focus = true;
+                open_filters();
             return;
         }
         if (nav_focus)
@@ -1553,7 +1567,7 @@ void input(std::uint32_t b)
                 nav_cursor = (nav_cursor + 1) % 12;
             if (b & (RIGHT | CROSS))
             {
-                query.view = nav_cursor;
+                query.view = view_order[nav_cursor];
                 cursor = 0;
                 filtered_count = 0;
                 nav_focus = false;
@@ -1566,13 +1580,13 @@ void input(std::uint32_t b)
         if (!filtered_count)
         {
             if (b & LEFT)
-                nav_focus = true;
+                open_filters();
             return;
         }
         if (b & LEFT)
         {
             if (cursor % 6 == 0)
-                nav_focus = true;
+                open_filters();
             else
                 cursor--;
         }
@@ -1899,7 +1913,7 @@ void draw_library(Canvas &c)
     const char *name = query.view >= 100 ? db.folders[query.view - 100].name : views[query.view];
     text(c, 76, 145, name, 44, white, 1250);
     char detail[200];
-    std::snprintf(detail, sizeof detail, "%d jogos  ·  %s%s%s", filtered_count, sorts[query.sort],
+    std::snprintf(detail, sizeof detail, "%d %s  ·  %s%s%s", filtered_count, query.view == 4 ? "apps" : "jogos", sorts[query.sort],
                   query.text[0] ? "  ·  " : "", query.text);
     text(c, 78, 207, detail, 24, muted, 1600);
     const int start = (cursor / 12) * 12;
@@ -1943,7 +1957,7 @@ void draw_library(Canvas &c)
             bool focus = nav_cursor == i;
             if (focus)
                 c.rounded_rectangle(48, y - 3, 438, 51, 6, accent);
-            text(c, 66, y, views[i], 28, focus ? bg : white, 405);
+            text(c, 66, y, views[view_order[i]], 28, focus ? bg : white, 405);
         }
     }
 }
