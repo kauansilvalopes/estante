@@ -130,6 +130,14 @@ int main(int argc, char **argv)
     assert(nav_focus);
     input(TOUCH);
     assert(!nav_focus);
+    input(TOUCH);
+    input(CIRCLE);
+    assert(screen == 1 && !nav_focus);
+    std::snprintf(query.text, sizeof query.text, "last");
+    rebuild();
+    assert(filtered_count < count);
+    input(CIRCLE);
+    assert(!query.text[0] && filtered_count == count && screen == 1);
     input(L1);
     assert(screen == 0);
     start_request(4, "/api/state");

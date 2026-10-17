@@ -953,6 +953,7 @@ enum Action
     CollectionSort,
     CollectionChildren,
     Search,
+    ClearSearch,
     Filter,
     Sort,
     SmartFolder,
@@ -974,6 +975,13 @@ int menu_count = 0;
 void add_menu(Action a, const char *s)
 {
     menu[menu_count++] = {a, s};
+}
+void clear_search()
+{
+    query.text[0] = 0;
+    cursor = 0;
+    filtered_count = 0;
+    rebuild();
 }
 void open_menu(int kind)
 {
@@ -1009,6 +1017,8 @@ void open_menu(int kind)
         if (editing_collection >= 0)
             add_menu(ApplySelection, "Salvar seleção nesta coleção");
         add_menu(Search, "Buscar jogo");
+        if (query.text[0])
+            add_menu(ClearSearch, "Limpar busca");
         add_menu(Filter, "Filtrar biblioteca");
         add_menu(Sort, "Ordenar");
         add_menu(NewFolder, "Criar coleção");
@@ -1115,6 +1125,9 @@ void action(Action a)
         break;
     case Search:
         open_keyboard(1);
+        break;
+    case ClearSearch:
+        clear_search();
         break;
     case NewFolder:
         open_keyboard(0);
@@ -1554,7 +1567,9 @@ void input(std::uint32_t b)
                 open_collection(collection_parent);
             }
             else if (nav_focus)
-                set_screen(0);
+                nav_focus = false;
+            else if (query.text[0])
+                clear_search();
             else
                 open_filters();
             return;
@@ -2275,6 +2290,8 @@ std::uint64_t state_signature()
         add(static_cast<unsigned char>(*p));
     for (const char *p = entry_name; *p; p++)
         add(static_cast<unsigned char>(*p));
+    for (const char *p = query.text; *p; p++)
+        add(static_cast<unsigned char>(*p));
     return h;
 }
 void draw(Canvas &c) noexcept
@@ -2323,7 +2340,7 @@ void draw(Canvas &c) noexcept
             text(c, 360, 1031, editing_collection >= 0 ? "×  Selecionar" : "×  Jogar", 24, white, 250);
             text(c, 620, 1031, "△  Organizar", 24, muted, 250);
             text(c, 900, 1031, "□  Selecionar", 24, muted, 250);
-            text(c, 1190, 1031, "Touchpad  Filtros", 24, accent, 300);
+            text(c, 1190, 1031, query.text[0] ? "○  Limpar busca" : "Touchpad  Filtros", 24, accent, 300);
             text(c, 1540, 1031, "Options  Opções", 24, muted, 300);
         }
         else
