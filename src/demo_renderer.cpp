@@ -49,6 +49,7 @@ namespace ps5::demo
 {
 namespace
 {
+bool frame_drawn = false; // set by any Canvas drawing call; read by the presentation loop
 constexpr unsigned frame_width = 1920;
 constexpr unsigned frame_height = 1080;
 constexpr std::size_t frame_bytes = 0x1000000;
@@ -241,15 +242,35 @@ void notify(std::string_view message) noexcept
     return glyphs.front().rows;
 }
 
-[[nodiscard]] constexpr std::size_t tiled_byte_offset(unsigned x, unsigned y) noexcept
+// Same swizzle as before, split into a per-column and a per-row part (the XOR terms are separable).
+struct OffsetTables
 {
-    const std::uint32_t offset = ((y << 4) & 0x70U) ^ ((y << 5) & 0xf00U) ^ ((y << 9) & 0x1000U) ^
-                                 ((y << 8) & 0x4000U) ^ ((x << 2) & 0xcU) ^ ((x << 5) & 0x380U) ^
-                                 ((x << 4) & 0x400U) ^ ((x << 6) & 0x800U) ^ ((x << 9) & 0xa000U);
-    const std::uint32_t blocks_per_row = (frame_width + 127U) >> 7;
-    const std::uint32_t block_index = (y >> 7) * blocks_per_row + (x >> 7);
+    std::array<std::uint32_t, frame_width> column{}; // block column << 16 | x terms
+    std::array<std::uint32_t, frame_height> row_term{};
+    std::array<std::uint32_t, frame_height> row_base{};
+};
+[[nodiscard]] constexpr OffsetTables make_offset_tables() noexcept
+{
+    OffsetTables t{};
+    constexpr std::uint32_t blocks_per_row = (frame_width + 127U) >> 7;
+    for (unsigned x = 0; x < frame_width; ++x)
+        t.column[x] = ((x >> 7) << 16) | (((x << 2) & 0xcU) ^ ((x << 5) & 0x380U) ^
+                                         ((x << 4) & 0x400U) ^ ((x << 6) & 0x800U) ^
+                                         ((x << 9) & 0xa000U));
+    for (unsigned y = 0; y < frame_height; ++y)
+    {
+        t.row_term[y] = ((y << 4) & 0x70U) ^ ((y << 5) & 0xf00U) ^ ((y << 9) & 0x1000U) ^
+                        ((y << 8) & 0x4000U);
+        t.row_base[y] = (y >> 7) * blocks_per_row << 16;
+    }
+    return t;
+}
+constexpr OffsetTables offset_tables = make_offset_tables();
 
-    return (static_cast<std::size_t>(block_index) << 16) + offset;
+[[nodiscard]] inline std::size_t tiled_byte_offset(unsigned x, unsigned y) noexcept
+{
+    return static_cast<std::size_t>(offset_tables.row_base[y]) +
+           (offset_tables.column[x] ^ offset_tables.row_term[y]);
 }
 
 void put_pixel_unchecked(std::uint32_t *pixels, unsigned x, unsigned y, Color color) noexcept
@@ -432,6 +453,7 @@ const FontGlyph *glyph_for(std::uint32_t code, unsigned size)
 } // namespace
 void Canvas::dim() noexcept
 {
+    frame_drawn = true;
     for (unsigned y = 0; y < frame_height; y++)
         for (unsigned x = 0; x < frame_width; x++)
         {
@@ -443,6 +465,7 @@ void Canvas::dim() noexcept
 void Canvas::label(unsigned x, unsigned y, std::string_view value, unsigned size, Color color,
                    unsigned max_width) noexcept
 {
+    frame_drawn = true;
     load_font();
     if (!font_data)
     {
@@ -495,6 +518,7 @@ void Canvas::label(unsigned x, unsigned y, std::string_view value, unsigned size
 void Canvas::picture(unsigned x, unsigned y, unsigned width, unsigned height, unsigned source_edge,
                      const std::uint32_t *source) noexcept
 {
+    frame_drawn = true;
     if (!source || !source_edge || !width || !height || x >= frame_width || y >= frame_height)
         return;
     for (unsigned yy = 0; yy < height && y + yy < frame_height; yy++)
@@ -508,6 +532,7 @@ void Canvas::picture(unsigned x, unsigned y, unsigned width, unsigned height, un
 
 void Canvas::image(unsigned x, unsigned y, unsigned edge, const std::uint32_t *source) noexcept
 {
+    frame_drawn = true;
     if (!source || !edge || x >= frame_width || y >= frame_height)
         return;
     for (unsigned row = 0; row < edge && y + row < frame_height; row++)
@@ -540,6 +565,7 @@ namespace
 void Canvas::gradient(unsigned x, unsigned y, unsigned width, unsigned height, Color top,
                       Color bottom) noexcept
 {
+    frame_drawn = true;
     if (!width || !height || x >= frame_width || y >= frame_height)
         return;
     const unsigned right = width > frame_width - x ? frame_width : x + width;
@@ -557,6 +583,7 @@ void Canvas::gradient(unsigned x, unsigned y, unsigned width, unsigned height, C
 void Canvas::blend(unsigned x, unsigned y, unsigned width, unsigned height, Color color,
                    unsigned alpha) noexcept
 {
+    frame_drawn = true;
     if (!width || !height || x >= frame_width || y >= frame_height || !alpha)
         return;
     if (alpha > 255)
@@ -577,6 +604,7 @@ void Canvas::rounded_picture(unsigned x, unsigned y, unsigned width, unsigned he
                              unsigned radius, unsigned source_edge,
                              const std::uint32_t *source) noexcept
 {
+    frame_drawn = true;
     if (!source || !source_edge || !width || !height || x >= frame_width || y >= frame_height)
         return;
     if (radius > width / 2)
@@ -604,6 +632,7 @@ void Canvas::rounded_picture(unsigned x, unsigned y, unsigned width, unsigned he
 void Canvas::shadow(unsigned x, unsigned y, unsigned width, unsigned height, unsigned spread,
                     unsigned alpha) noexcept
 {
+    frame_drawn = true;
     // Soft shadow made of rounded rings that fade outward; shifted down, no overdraw under the card.
     constexpr unsigned step = 3;
     constexpr unsigned corner = 18;
@@ -674,6 +703,7 @@ void Canvas::shadow(unsigned x, unsigned y, unsigned width, unsigned height, uns
 void Canvas::rounded_rectangle(unsigned x, unsigned y, unsigned width, unsigned height,
                                unsigned radius, Color color) noexcept
 {
+    frame_drawn = true;
     if (!width || !height)
         return;
     if (radius > width / 2)
@@ -693,29 +723,34 @@ void Canvas::rounded_rectangle(unsigned x, unsigned y, unsigned width, unsigned 
 
 void Canvas::clear(Color color) noexcept
 {
+    frame_drawn = true;
     fill_rect(pixels_, 0, 0, frame_width, frame_height, color);
 }
 
 void Canvas::rectangle(unsigned x, unsigned y, unsigned width, unsigned height,
                        Color color) noexcept
 {
+    frame_drawn = true;
     fill_rect(pixels_, x, y, width, height, color);
 }
 
 void Canvas::circle(unsigned center_x, unsigned center_y, unsigned radius, Color color) noexcept
 {
+    frame_drawn = true;
     fill_circle(pixels_, center_x, center_y, radius, color);
 }
 
 void Canvas::triangle(unsigned center_x, unsigned top, unsigned half_width, unsigned height,
                       Color color) noexcept
 {
+    frame_drawn = true;
     fill_triangle(pixels_, center_x, top, half_width, height, color);
 }
 
 void Canvas::text(unsigned x, unsigned y, std::string_view value, unsigned scale,
                   Color color) noexcept
 {
+    frame_drawn = true;
     draw_text(pixels_, x, y, value, scale, color);
 }
 
@@ -777,12 +812,18 @@ void read_asset_text(const char *path, std::span<char> destination,
     if (result < 0)
         halt("Hello World: direct-memory mapping failed");
 
-    Canvas first{static_cast<std::uint32_t *>(mapped)};
+    // Draw into ordinary cached memory (cheap read-modify-write for shadows and text), then copy the
+    // finished frame to the write-combined video buffers.
+    static std::uint32_t scene[frame_bytes / sizeof(std::uint32_t)];
+    constexpr std::size_t used_bytes = static_cast<std::size_t>((frame_width + 127U) >> 7) *
+                                       ((frame_height + 127U) >> 7) * 0x10000U;
     auto *second_frame = static_cast<std::uint8_t *>(mapped) + frame_bytes;
-    Canvas second{reinterpret_cast<std::uint32_t *>(second_frame)};
-    draw(first);
-    draw(second);
-    flush_range(mapped, memory_bytes);
+    Canvas scene_canvas{scene};
+    draw(scene_canvas);
+    std::memcpy(mapped, scene, used_bytes);
+    std::memcpy(second_frame, scene, used_bytes);
+    flush_range(mapped, used_bytes);
+    flush_range(second_frame, used_bytes);
 
     std::array<VideoBuffer, 2> buffers{{
         {mapped, nullptr, nullptr, nullptr},
@@ -804,18 +845,36 @@ void read_asset_text(const char *path, std::span<char> destination,
     (void)sceVideoOutWaitVblank(video);
     notify(ready_message);
 
-    // Each frame is drawn whole into the buffer that isn't on screen, then shown.
+    // The scene callback redraws into the cached buffer only when its state changed; a changed frame
+    // is copied to both video buffers (one per flip), idle frames cost only the vblank wait.
     if (every_frame)
+    {
+        std::size_t shown = 0;
+        int stale = 0;
         for (std::int64_t frame = 2;; ++frame)
         {
-            const std::size_t back = static_cast<std::size_t>(frame & 1) ^ 1U;
-            Canvas canvas{static_cast<std::uint32_t *>(buffers[back].data)};
+            frame_drawn = false;
+            Canvas canvas{scene};
             draw(canvas);
-            flush_range(buffers[back].data, frame_bytes);
-            if (sceVideoOutSubmitFlip(video, static_cast<std::int32_t>(back), 1, frame) < 0)
-                (void)sceKernelUsleep(4000); // the previous flip is still queued
+            if (frame_drawn)
+                stale = 2;
+            if (stale > 0)
+            {
+                const std::size_t back = shown ^ 1U;
+                std::memcpy(buffers[back].data, scene, used_bytes);
+                flush_range(buffers[back].data, used_bytes);
+                if (sceVideoOutSubmitFlip(video, static_cast<std::int32_t>(back), 1, frame) < 0)
+                {
+                    (void)sceKernelUsleep(4000); // the previous flip is still queued
+                    (void)sceVideoOutWaitVblank(video);
+                    continue; // try this frame again; do not count it
+                }
+                shown = back;
+                --stale;
+            }
             (void)sceVideoOutWaitVblank(video);
         }
+    }
 
     // Returning from main or calling exit crashes this launch context.
     for (;;)

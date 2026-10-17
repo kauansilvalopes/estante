@@ -1,5 +1,6 @@
 // Render the real native draw callback on a host; no console launch is simulated.
 #include <cassert>
+#include <chrono>
 #define main estante_console_entry
 #include "../src/main.cpp"
 #undef main
@@ -205,6 +206,25 @@ int main(int argc, char **argv)
         rebuild();
     }
     auto canvas = Canvas::host_preview(frame);
+    if (!std::strcmp(mode, "bench"))
+    {
+        // Host timing of full redraws per screen (relative numbers only; the console CPU differs).
+        for (int target : {0, 1, 2, 3})
+        {
+            screen = target;
+            draw(canvas);
+            const auto t0 = std::chrono::steady_clock::now();
+            for (int i = 0; i < 30; i++)
+            {
+                ui_version++;
+                draw(canvas);
+            }
+            const auto t1 = std::chrono::steady_clock::now();
+            std::printf("screen %d: %.2f ms/frame\n", target,
+                        std::chrono::duration<double, std::milli>(t1 - t0).count() / 30.0);
+        }
+        return 0;
+    }
     draw(canvas);
     FILE *f = std::fopen(argv[1], "wb");
     if (!f)

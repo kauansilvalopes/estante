@@ -2140,26 +2140,20 @@ void draw(Canvas &c) noexcept
         start_request(5, "/api/state");
     }
     request_visible_cover();
+    // The renderer keeps the finished frame in a cached buffer, so an unchanged state needs no redraw.
     static std::uint64_t previous = 0;
-    static int stable_frames = 0;
-    auto signature = state_signature();
+    const auto signature = state_signature();
     if (signature == previous)
-    {
-        if (stable_frames >= 2)
-            return;
-        stable_frames++;
-    }
-    else
-    {
-        previous = signature;
-        stable_frames = 0;
-    }
-    c.clear(bg);
+        return;
+    previous = signature;
     if (const Cover *tinted = focus_cover())
     {
         const Color top = mix_color(static_cast<Color>(tinted->tint), bg, 92);
         c.gradient(0, 0, 1920, 700, top, bg);
+        c.rectangle(0, 700, 1920, 380, bg); // the gradient already covers the top, no double write
     }
+    else
+        c.clear(bg);
     draw_top(c);
     if (screen == 0)
         draw_home(c);
