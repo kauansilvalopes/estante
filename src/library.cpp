@@ -101,6 +101,9 @@ static bool starts_with(const char *id, const char *prefix)
 // the 9xxxx range is used by homebrew apps; PS2/PSP serials are PS2; anything else is an app (1).
 static int default_platform(const char *id)
 {
+    // "PS2" + 6 hex digits: made up by the app for PS2 images, which have no title id.
+    if (starts_with(id, "PS2"))
+        return 2;
     const bool ps5 = starts_with(id, "PPSA"), ps4 = starts_with(id, "CUSA");
     if (ps5 || ps4)
     {

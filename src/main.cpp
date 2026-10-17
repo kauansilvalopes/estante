@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <strings.h>
 #include <cstdint>
 #include <pthread.h>
 #include <fcntl.h>
@@ -110,6 +111,13 @@ int work_kind = 0, pending_kind = 0;
 char pending_path[160]{};
 bool response_ok = false;
 char requested_cover[10]{}, launch_id[10]{};
+// PS2 images found in the PS5SX2 games folder: file name (with extension) per library slot, empty for
+// normal titles. The id is made up ("PS2" + hash) because an image has no title id.
+char ps2_file[max_games][144]{};
+constexpr const char *ps2_games_dir = "/data/PCSX2/games";
+// false: Estante only writes the start request and asks the player to open PS5SX2 from the home screen
+// (the way tested on the console). true: it also asks Elf Arsenal to open PS5SX2.
+constexpr bool ps2_open_from_estante = false;
 std::uint32_t decoded_cover[cover_edge * cover_edge]{};
 bool cover_ok = false;
 std::uint64_t verify_at = 0;
@@ -628,6 +636,74 @@ bool parse_running(char *title, bool &running)
     cJSON_Delete(root);
     return ok;
 }
+bool is_ps2_id(const char *id)
+{
+    return id[0] == 'P' && id[1] == 'S' && id[2] == '2';
+}
+bool ps2_image_name(const char *name, char *stem, std::size_t cap)
+{
+    const std::size_t n = std::strlen(name);
+    static const char *const exts[] = {".iso", ".chd", ".cso", ".zso"};
+    for (const char *ext : exts)
+    {
+        const std::size_t e = std::strlen(ext);
+        if (n > e && n - e < cap && !strcasecmp(name + n - e, ext))
+        {
+            std::memcpy(stem, name, n - e);
+            stem[n - e] = 0;
+            return true;
+        }
+    }
+    return false;
+}
+// Adds the PS2 images listed by Elf Arsenal (/api/fs/list) after the catalog.
+void add_ps2_games(const char *json)
+{
+    for (int i = 0; i < count; i++)
+        if (is_ps2_id(games[i].id))
+        {
+            // Drop images from the previous scan; the loop below adds the current ones.
+            for (int j = i; j + 1 < count; j++)
+            {
+                games[j] = games[j + 1];
+                std::memcpy(ps2_file[j], ps2_file[j + 1], sizeof ps2_file[j]);
+            }
+            count--;
+            i--;
+        }
+    std::memset(ps2_file[count], 0, sizeof(ps2_file[0]) * static_cast<std::size_t>(max_games - count));
+    cJSON *root = cJSON_Parse(json);
+    const cJSON *list = root ? cJSON_GetObjectItemCaseSensitive(root, "entries") : nullptr;
+    const cJSON *e = nullptr;
+    cJSON_ArrayForEach(e, list)
+    {
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(e, "name");
+        const cJSON *dir = cJSON_GetObjectItemCaseSensitive(e, "dir");
+        char stem[144];
+        if (count >= max_games || !cJSON_IsString(name) || cJSON_IsTrue(dir) ||
+            std::strlen(name->valuestring) >= sizeof ps2_file[0] ||
+            !ps2_image_name(name->valuestring, stem, sizeof stem))
+            continue;
+        unsigned hash = 2166136261u;
+        for (const char *q = name->valuestring; *q; q++)
+            hash = (hash ^ static_cast<unsigned char>(*q)) * 16777619u;
+        char id[10];
+        for (unsigned salt = 0;; salt++)
+        {
+            std::snprintf(id, sizeof id, "PS2%06X", (hash + salt) & 0xffffffu);
+            bool taken = false;
+            for (int i = 0; i < count; i++)
+                taken = taken || !std::strcmp(games[i].id, id);
+            if (!taken)
+                break;
+        }
+        std::snprintf(games[count].id, sizeof games[count].id, "%s", id);
+        std::snprintf(games[count].name, sizeof games[count].name, "%s", stem);
+        std::snprintf(ps2_file[count], sizeof ps2_file[count], "%s", name->valuestring);
+        count++;
+    }
+    cJSON_Delete(root);
+}
 void poll_work()
 {
     if (work.load(std::memory_order_acquire) != 2)
@@ -646,6 +722,7 @@ void poll_work()
         {
             std::memcpy(games, updated, sizeof games);
             count = n;
+            std::memset(ps2_file, 0, sizeof ps2_file);
             std::memset(selected, 0, sizeof selected);
             std::memset(played_last, 0, sizeof played_last);
             std::memset(played_seconds, 0, sizeof played_seconds);
@@ -668,6 +745,16 @@ void poll_work()
         if (response_ok && parse_activity())
         {
             activity_fetched = sceKernelGetProcessTime();
+            rebuild();
+        }
+        next = 7;
+        std::snprintf(path, sizeof path, "/api/fs/list?path=%s", ps2_games_dir);
+    }
+    else if (work_kind == 7)
+    {
+        if (response_ok && editing_collection < 0)
+        {
+            add_ps2_games(response);
             rebuild();
         }
     }
@@ -777,10 +864,46 @@ void poll_work()
         start_request(kind, pending_path);
     }
 }
+// PS5SX2 reads /data/PCSX2/logs/disc-launch.txt when it starts: first line is the image to play.
+void queue_ps2_launch(int idx)
+{
+    char request[200], file[160];
+    std::snprintf(file, sizeof file, "/data/PCSX2/logs/disc-launch.txt");
+    std::snprintf(request, sizeof request, "%s/%s\n", ps2_games_dir, ps2_file[idx]);
+    if (!write_file(file, request))
+    {
+        msg("Não consegui gravar o pedido para o PS5SX2.");
+        return;
+    }
+    Library nextdb = db;
+    auto *m = metadata(nextdb, games[idx].id);
+    auto now = std::time(nullptr);
+    if (m && now > 0)
+    {
+        m->lastChosen = static_cast<std::uint64_t>(now);
+        if (storage_ok && persist(nextdb))
+            rebuild();
+    }
+    if (!ps2_open_from_estante)
+    {
+        msg("Pedido gravado. Abra o PS5SX2 pela tela inicial do PS5 e o jogo começa direto.");
+        return;
+    }
+    std::snprintf(launch_id, 10, "PPSA99203");
+    launch_pending = true;
+    verify_at = 0;
+    msg("Verificando o console…");
+    start_request(4, "/api/state");
+}
 void queue_launch(int idx)
 {
     if (idx < 0 || idx >= count || launch_pending)
         return;
+    if (is_ps2_id(games[idx].id) && ps2_file[idx][0])
+    {
+        queue_ps2_launch(idx);
+        return;
+    }
     std::snprintf(launch_id, 10, "%s", games[idx].id);
     launch_pending = true;
     verify_at = 0;
@@ -1775,7 +1898,8 @@ void artwork(Canvas &c, int idx, unsigned x, unsigned y, unsigned edge, bool foc
     c.rectangle(mx, my + edge / 8, w * 3 / 4, 4, muted);
     c.rectangle(mx, my + edge / 4, w, 4, muted);
     if (edge > 180 && idx >= 0)
-        text(c, x + 20, y + edge - 55, games[idx].id, 24, muted, edge - 40);
+        text(c, x + 20, y + edge - 55, is_ps2_id(games[idx].id) ? games[idx].name : games[idx].id, 24, muted,
+             edge - 40);
 }
 const Cover *focus_cover()
 {
@@ -2079,7 +2203,7 @@ void draw_modal(Canvas &c)
         text(c, 848, 395, "Sua escolha. Seu próximo jogo.", 28, muted, 650);
         pill(c, 848, 500, 330, launch_pending ? "Abrindo…" : "×  Jogar", true);
         pill(c, 848, 560, 360, "△  Organizar");
-        text(c, 400, 760, games[idx].id, 28, muted, 1090);
+        text(c, 400, 760, is_ps2_id(games[idx].id) ? "PS2" : games[idx].id, 28, muted, 1090);
         text(c, 400, 830, "○  Voltar", 28, white, 600);
         return;
     }
@@ -2267,7 +2391,7 @@ void request_visible_cover()
     for (int k = 0; k < n; k++)
     {
         const char *id = games[wanted[k]].id;
-        if (find_cover(id))
+        if (is_ps2_id(id) || find_cover(id))
             continue;
         bool failed = false;
         for (int i = 0; i < failed_cover_count; i++)

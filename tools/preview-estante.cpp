@@ -280,6 +280,22 @@ int main(int argc, char **argv)
         rebuild();
         screen = 1;
     }
+    if (!std::strcmp(mode, "ps2"))
+    {
+        add_ps2_games("{\"entries\":[{\"name\":\"Shadow of the Colossus (BR) (Dub-e-Leg).iso\",\"dir\":false},"
+                      "{\"name\":\"Toy Story 3 (BR).iso\",\"dir\":false},{\"name\":\"notes.txt\",\"dir\":false},"
+                      "{\"name\":\"Jackie Chan Adventures (PT).iso.partial\",\"dir\":false},"
+                      "{\"name\":\"Wall-E (BR).iso\",\"dir\":false}]}");
+        assert(count == 11 && is_ps2_id(games[8].id) && !std::strcmp(ps2_file[9], "Toy Story 3 (BR).iso"));
+        add_ps2_games("{\"entries\":[{\"name\":\"UP (BR).iso\",\"dir\":false}]}"); // rescan replaces
+        assert(count == 9 && !std::strcmp(games[8].name, "UP (BR)") && platform(games[8], db) == 2);
+        add_ps2_games("{\"entries\":[{\"name\":\"Shadow of the Colossus (BR) (Dub-e-Leg).iso\",\"dir\":false},"
+                      "{\"name\":\"Toy Story 3 (BR).iso\",\"dir\":false},{\"name\":\"Wall-E (BR).iso\",\"dir\":false}]}");
+        rebuild();
+        query.view = 1;
+        rebuild();
+        screen = 1;
+    }
     if (!std::strcmp(mode, "sidebar"))
     {
         screen = 1;

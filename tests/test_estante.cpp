@@ -10,7 +10,7 @@ int main(){
  {Library empty{};
   auto plat=[&](const char*id){Game g{};std::snprintf(g.id,10,"%s",id);return platform(g,empty);};
   assert(plat("PPSA01575")==5&&plat("CUSA03507")==4&&plat("PPSA99203")==1&&plat("PPSA99841")==1);
-  assert(plat("SLUS20624")==2&&plat("SLES54510")==2&&plat("ULUS10564")==2&&plat("FAKE00000")==1&&plat("PSPS69691")==1);}
+  assert(plat("SLUS20624")==2&&plat("SLES54510")==2&&plat("ULUS10564")==2&&plat("FAKE00000")==1&&plat("PSPS69691")==1&&plat("PS2A1B2C3")==2);}
  assert(valid_library(d));Game g{"CUSA12345","Teste"};assert(platform(g,d)==2);
  char* s=write_library(d);assert(s);Library copy{};assert(read_library(s,copy));cJSON_free(s);
  assert(copy.games[0].folders==7&&copy.games[0].favorite&&!copy.games[0].hidden);
