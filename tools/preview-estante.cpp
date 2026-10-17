@@ -168,7 +168,20 @@ int main(int argc, char **argv)
     rebuild();
     assert(home_cursor == 5);
     home_cursor = 0;
+    std::memset(played_last, 0, sizeof played_last);
+    activity_now = 1800000000ull;
+    played_last[3] = activity_now - 600;
+    played_seconds[3] = 14500;
+    played_last[1] = activity_now - 7200;
+    played_seconds[1] = 2700;
+    played_last[6] = activity_now - 3 * 86400;
+    played_seconds[6] = 80000;
+    rebuild();
+    assert(home_games[0] == 3 && home_games[1] == 1 && home_games[2] == 6);
+    home_cursor = 0;
     const char *mode = argc == 3 ? argv[2] : "home";
+    if (!std::strcmp(mode, "homemid"))
+        home_cursor = 3;
     if (!std::strcmp(mode, "library"))
     {
         screen = 1;

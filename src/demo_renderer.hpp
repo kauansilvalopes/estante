@@ -55,6 +55,8 @@ class Canvas final
                  const std::uint32_t *pixels) noexcept;
     void image(unsigned x, unsigned y, unsigned edge, const std::uint32_t *pixels) noexcept;
     // Vertical gradient, translucent fill, rounded scaled picture and soft shadow (CPU, bounded).
+    // Width in pixels that label() would use for this text (for centring).
+    unsigned measure(std::string_view value, unsigned size) noexcept;
     void gradient(unsigned x, unsigned y, unsigned width, unsigned height, Color top,
                   Color bottom) noexcept;
     void blend(unsigned x, unsigned y, unsigned width, unsigned height, Color color,

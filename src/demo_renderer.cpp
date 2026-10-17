@@ -462,6 +462,21 @@ void Canvas::dim() noexcept
             *d = 0xff000000u | ((*d & 0x00fefefeu) >> 1);
         }
 }
+unsigned Canvas::measure(std::string_view value, unsigned size) noexcept
+{
+    load_font();
+    if (!font_data)
+        return static_cast<unsigned>(value.size()) * (size >= 44 ? 30U : 18U);
+    unsigned width = 0;
+    for (std::size_t i = 0; i < value.size();)
+    {
+        const auto *g = glyph_for(next_code(value, i), size);
+        if (g)
+            width += g->advance;
+    }
+    return width;
+}
+
 void Canvas::label(unsigned x, unsigned y, std::string_view value, unsigned size, Color color,
                    unsigned max_width) noexcept
 {

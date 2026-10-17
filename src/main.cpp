@@ -110,6 +110,8 @@ bool cover_ok = false;
 std::uint64_t verify_at = 0;
 int verify_attempts = 0;
 bool launch_pending = false;
+std::uint64_t played_last[max_games]{}, activity_now = 0, activity_fetched = 0;
+std::uint32_t played_seconds[max_games]{};
 constexpr char keys[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -";
 constexpr int key_count = sizeof(keys) - 1;
 const char *views[] = {"Todos os jogos", "PlayStation 2", "PlayStation 4", "PlayStation 5",
@@ -285,12 +287,21 @@ void rebuild()
         std::snprintf(focused, 10, "%s", games[home_games[home_cursor]].id);
     Query homeQuery;
     home_count = select_games(db, games, count, homeQuery, home_games);
+    auto recency = [](int i)
+    {
+        const auto *m = meta(i);
+        const std::uint64_t chosen = m ? m->lastChosen : 0;
+        return played_last[i] > chosen ? played_last[i] : chosen;
+    };
     std::stable_sort(home_games, home_games + home_count,
-                     [](int a, int b)
+                     [&](int a, int b)
                      {
                          auto *ma = meta(a);
                          auto *mb = meta(b);
-                         return (ma && ma->pinned) && !(mb && mb->pinned);
+                         const bool pa = ma && ma->pinned, pb = mb && mb->pinned;
+                         if (pa != pb)
+                             return pa;
+                         return recency(a) > recency(b);
                      });
     for (int i = 0; i < home_count; i++)
         if (!std::strcmp(focused, games[home_games[i]].id))
@@ -513,6 +524,45 @@ void start_request(int kind, const char *path)
     if (kind == 1)
         msg("Atualizando a biblioteca…");
 }
+bool parse_activity()
+{
+    cJSON *root = cJSON_Parse(response);
+    if (!root)
+        return false;
+    if (!cJSON_IsObject(root))
+    {
+        cJSON_Delete(root);
+        return false;
+    }
+    std::memset(played_last, 0, sizeof played_last);
+    std::memset(played_seconds, 0, sizeof played_seconds);
+    const cJSON *now = cJSON_GetObjectItemCaseSensitive(root, "__nowTs");
+    activity_now = cJSON_IsNumber(now) && now->valuedouble > 0
+                       ? static_cast<std::uint64_t>(now->valuedouble)
+                       : 0;
+    for (const cJSON *item = root->child; item; item = item->next)
+    {
+        if (!item->string || item->string[0] == '_' || !cJSON_IsObject(item))
+            continue;
+        int idx = -1;
+        for (int i = 0; i < count; i++)
+            if (!std::strcmp(games[i].id, item->string))
+            {
+                idx = i;
+                break;
+            }
+        if (idx < 0)
+            continue;
+        const cJSON *last = cJSON_GetObjectItemCaseSensitive(item, "lastLaunchTs");
+        const cJSON *secs = cJSON_GetObjectItemCaseSensitive(item, "totalSeconds");
+        if (cJSON_IsNumber(last) && last->valuedouble > 0)
+            played_last[idx] = static_cast<std::uint64_t>(last->valuedouble);
+        if (cJSON_IsNumber(secs) && secs->valuedouble > 0 && secs->valuedouble < 4e9)
+            played_seconds[idx] = static_cast<std::uint32_t>(secs->valuedouble);
+    }
+    cJSON_Delete(root);
+    return true;
+}
 bool parse_running(char *title, bool &running)
 {
     cJSON *root = cJSON_Parse(response);
@@ -548,16 +598,28 @@ void poll_work()
             std::memcpy(games, updated, sizeof games);
             count = n;
             std::memset(selected, 0, sizeof selected);
+            std::memset(played_last, 0, sizeof played_last);
+            std::memset(played_seconds, 0, sizeof played_seconds);
             if (storage_ok)
                 write_file("/download0/catalog.json", response);
             std::snprintf(connection, sizeof connection, "Biblioteca atualizada");
             msg("Seus jogos estão prontos para organizar.");
             rebuild();
+            next = 6;
+            std::snprintf(path, sizeof path, "/api/activity");
         }
         else
         {
             std::snprintf(connection, sizeof connection, "Usando biblioteca salva");
             msg("Elf Arsenal indisponível. Sua organização foi preservada.");
+        }
+    }
+    else if (work_kind == 6)
+    {
+        if (response_ok && parse_activity())
+        {
+            activity_fetched = sceKernelGetProcessTime();
+            rebuild();
         }
     }
     else if (work_kind == 3)
@@ -733,6 +795,9 @@ void clear_selection()
 }
 void set_screen(int next)
 {
+    if (next == 0 && count > 0 && work.load() == 0 && !launch_pending && !pending_kind &&
+        (!activity_fetched || sceKernelGetProcessTime() - activity_fetched > 20000000ull))
+        start_request(6, "/api/activity");
     screen = next;
     nav_focus = false;
     modal = 0;
@@ -1684,7 +1749,7 @@ void breadcrumb(char *out, std::size_t cap, int slot)
 void draw_top(Canvas &c)
 {
     text(c, 64, 28, "estante", 44, white, 260);
-    text(c, 265, 54, "0.3 r2", 24, muted, 130);
+    text(c, 265, 54, "0.4", 24, muted, 130);
     const char *tabs[] = {"Início", "Biblioteca", "Coleções", "Ajustes"};
     unsigned xs[] = {430, 630, 890, 1130};
     for (int i = 0; i < 4; i++)
@@ -1696,39 +1761,87 @@ void draw_top(Canvas &c)
     text(c, 1590, 43, "@kndofc", 28, accent, 230);
     line(c, 64, 110, 1792);
 }
+void format_ago(std::uint64_t last, char *out, std::size_t cap)
+{
+    out[0] = 0;
+    if (!last || !activity_now || activity_now < last)
+        return;
+    const std::uint64_t age = activity_now - last;
+    if (age < 120)
+        std::snprintf(out, cap, "jogado agora há pouco");
+    else if (age < 3600)
+        std::snprintf(out, cap, "jogado há %u min", static_cast<unsigned>(age / 60));
+    else if (age < 86400)
+        std::snprintf(out, cap, "jogado há %u h", static_cast<unsigned>(age / 3600));
+    else
+        std::snprintf(out, cap, "jogado há %u dias", static_cast<unsigned>(age / 86400));
+}
+void format_playtime(std::uint32_t seconds, char *out, std::size_t cap)
+{
+    out[0] = 0;
+    if (seconds < 60)
+        return;
+    if (seconds < 3600)
+        std::snprintf(out, cap, "%u min de jogo", seconds / 60);
+    else
+    {
+        const unsigned hours = seconds / 3600, minutes = (seconds % 3600) / 60;
+        if (hours >= 10 || !minutes)
+            std::snprintf(out, cap, "%u h de jogo", hours);
+        else
+            std::snprintf(out, cap, "%u h %u min de jogo", hours, minutes);
+    }
+}
+void centered(Canvas &c, unsigned y, const char *s, unsigned size, Color color, unsigned max_width)
+{
+    unsigned width = c.measure(s, size);
+    if (width > max_width)
+        width = max_width;
+    text(c, (1920 - width) / 2, y, s, size, color, max_width);
+}
 void draw_home(Canvas &c)
 {
-    text(c, 76, 164, "Seus jogos", 44, white, 1000);
+    const bool recents =
+        home_count && (played_last[home_games[0]] > 0 || (meta(home_games[0]) && meta(home_games[0])->lastChosen));
+    text(c, 76, 150, recents ? "Jogos recentes" : "Seus jogos", 44, white, 1000);
     char position[80];
     std::snprintf(position, sizeof position, "%d / %d", home_count ? home_cursor + 1 : 0,
                   home_count);
-    text(c, 1650, 178, position, 28, muted, 190);
-    const int start = (home_cursor / 5) * 5;
-    unsigned x = 78;
-    for (int i = start; i < home_count && i < start + 5; i++)
-    {
-        const bool current = i == home_cursor;
-        const unsigned edge = current ? 356 : 304, y = current ? 272 : 298;
-        artwork(c, home_games[i], x, y, edge, home_row == 0 && current);
-        if (!current)
-            text(c, x, y + edge + 22, games[home_games[i]].name, 24, muted, edge);
-        x += edge + 40;
-    }
+    text(c, 1650, 164, position, 28, muted, 190);
     if (home_count)
     {
+        // Cover flow: the focused game is large and centred, neighbours shrink to each side.
+        static constexpr int offsets[] = {-2, 2, -1, 1, 0};
+        for (int offset : offsets)
+        {
+            const int i = home_cursor + offset;
+            if (i < 0 || i >= home_count)
+                continue;
+            const int distance = offset < 0 ? -offset : offset;
+            const unsigned edge = distance == 0 ? 420 : distance == 1 ? 300 : 220;
+            const unsigned x = offset == -2   ? 158
+                               : offset == -1 ? 414
+                               : offset == 0  ? 750
+                               : offset == 1  ? 1206
+                                              : 1542;
+            artwork(c, home_games[i], x, 442 - edge / 2, edge, home_row == 0 && offset == 0);
+        }
         const int idx = home_games[home_cursor];
         const auto *m = meta(idx);
-        text(c, 78, 694, games[idx].name, 44, white, 1310);
-        char detail[150];
+        centered(c, 686, games[idx].name, 44, white, 1500);
+        char detail[220], ago[48], played[48];
+        format_ago(played_last[idx], ago, sizeof ago);
+        format_playtime(played_seconds[idx], played, sizeof played);
         const int p = platform(games[idx], db);
-        std::snprintf(detail, sizeof detail, "%s%s%s%s",
+        std::snprintf(detail, sizeof detail, "%s%s%s%s%s%s%s%s",
                       p == 2   ? "PlayStation 2"
                       : p == 4 ? "PlayStation 4"
                       : p == 5 ? "PlayStation 5"
                                : "Aplicativo",
                       m && m->pinned ? "  ·  Fixado" : "", m && m->status ? "  ·  " : "",
-                      m && m->status ? statuses[m->status] : "");
-        text(c, 80, 756, detail, 28, muted, 1300);
+                      m && m->status ? statuses[m->status] : "", ago[0] ? "  ·  " : "", ago,
+                      played[0] ? "  ·  " : "", played);
+        centered(c, 752, detail, 28, muted, 1500);
     }
     else
     {
@@ -2026,11 +2139,13 @@ void request_visible_cover()
         add(details_index);
     if (screen == 0)
     {
-        if (home_count)
-            add(home_games[home_cursor]);
-        int start = (home_cursor / 5) * 5;
-        for (int i = start; i < home_count && i < start + 5; i++)
-            add(home_games[i]);
+        for (int d = 0; d <= 3; d++)
+        {
+            if (home_cursor - d >= 0 && home_cursor - d < home_count)
+                add(home_games[home_cursor - d]);
+            if (d && home_cursor + d < home_count)
+                add(home_games[home_cursor + d]);
+        }
     }
     if (screen == 1)
     {
