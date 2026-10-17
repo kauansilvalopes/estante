@@ -56,8 +56,8 @@ extern "C"
 }
 namespace
 {
-constexpr Color bg = static_cast<Color>(0xff171310), panel = static_cast<Color>(0xff29221b),
-                accent = static_cast<Color>(0xffc3f0a6), muted = static_cast<Color>(0xffbdb4ab),
+constexpr Color bg = static_cast<Color>(0xff141110), panel = static_cast<Color>(0xff272220),
+                accent = static_cast<Color>(0xffffb153), muted = static_cast<Color>(0xffc9beb9),
                 white = Color::white;
 constexpr std::uint32_t UP = 0x10, RIGHT = 0x20, DOWN = 0x40, LEFT = 0x80, L1 = 0x400, R1 = 0x800,
                         TRIANGLE = 0x1000, CIRCLE = 0x2000, CROSS = 0x4000, SQUARE = 0x8000,
@@ -71,7 +71,7 @@ Query query{};
 int filtered[max_games]{}, filtered_count = 0, cursor = 0, nav_cursor = 0;
 bool nav_focus = false;
 int screen = 0, home_cursor = 0, home_row = 0, home_games[max_games]{}, home_count = 0;
-bool home_has_recent = false;
+
 int home_folders[max_folders]{}, home_folder_count = 0, home_folder_cursor = 0;
 int collection_parent = -1, collection_entries[34]{}, collection_count = 0, collection_cursor = 0,
     editing_collection = -1;
@@ -279,39 +279,21 @@ void rebuild()
     for (int i = 0; i < filtered_count; i++)
         if (!std::strcmp(previous, games[filtered[i]].id))
             cursor = i;
-    home_count = recent_games(db, games, count, home_games, 12);
-    home_has_recent = home_count > 0;
-    if (!home_count)
-    {
-        Query q;
-        q.view = 11;
-        home_count = select_games(db, games, count, q, home_games);
-        if (!home_count)
-        {
-            q.view = 8;
-            home_count = select_games(db, games, count, q, home_games);
-        }
-        if (!home_count)
-        {
-            q.view = 0;
-            home_count = select_games(db, games, count, q, home_games);
-        }
-    }
-    {
-        Query pinned;
-        pinned.view = 11;
-        int extra[max_games];
-        int n = select_games(db, games, count, pinned, extra);
-        for (int j = 0; j < n && home_count < 24; j++)
-        {
-            bool found = false;
-            for (int k = 0; k < home_count; k++)
-                if (home_games[k] == extra[j])
-                    found = true;
-            if (!found)
-                home_games[home_count++] = extra[j];
-        }
-    }
+    char focused[10]{};
+    if (home_count && home_cursor < home_count)
+        std::snprintf(focused, 10, "%s", games[home_games[home_cursor]].id);
+    Query homeQuery;
+    home_count = select_games(db, games, count, homeQuery, home_games);
+    std::stable_sort(home_games, home_games + home_count,
+                     [](int a, int b)
+                     {
+                         auto *ma = meta(a);
+                         auto *mb = meta(b);
+                         return (ma && ma->pinned) && !(mb && mb->pinned);
+                     });
+    for (int i = 0; i < home_count; i++)
+        if (!std::strcmp(focused, games[home_games[i]].id))
+            home_cursor = i;
     if (home_cursor >= home_count)
         home_cursor = home_count ? home_count - 1 : 0;
     home_folder_count = 0;
@@ -818,6 +800,7 @@ void submit_name()
 }
 enum Action
 {
+    Details,
     Add,
     FavoriteOn,
     FavoriteOff,
@@ -870,10 +853,18 @@ void open_menu(int kind)
     if (kind == 0)
     {
         add_menu(Add, "Adicionar a uma coleção");
-        add_menu(FavoriteOn, "Marcar como favorito");
-        add_menu(FavoriteOff, "Remover dos favoritos");
-        add_menu(PinOn, "Fixar no Início");
-        add_menu(PinOff, "Desafixar do Início");
+        const auto *m = meta(target_index());
+        const bool batch = screen == 1 && chosen_count() > 0;
+        if (batch || !m || !m->favorite)
+            add_menu(FavoriteOn, "Marcar como favorito");
+        if (batch || (m && m->favorite))
+            add_menu(FavoriteOff, "Remover dos favoritos");
+        if (batch || !m || !m->pinned)
+            add_menu(PinOn, "Fixar no Início");
+        if (batch || (m && m->pinned))
+            add_menu(PinOff, "Desafixar do Início");
+        if (!batch)
+            add_menu(Details, "Detalhes do jogo");
         add_menu(Status, "Meu progresso");
         add_menu(Classify, "Classificar plataforma");
         add_menu(screen == 1 && query.view == 7 ? Show : Hide, screen == 1 && query.view == 7
@@ -945,6 +936,11 @@ void action(Action a)
     modal = 0;
     switch (a)
     {
+    case Details:
+        details_index = target_index();
+        if (details_index >= 0)
+            modal = 5;
+        break;
     case Add:
         modal = 2;
         menu_cursor = 0;
@@ -1340,6 +1336,18 @@ void input(std::uint32_t b)
     }
     if (screen == 0)
     {
+        if (b & SQUARE)
+        {
+            open_library(0);
+            open_keyboard(1);
+            return;
+        }
+        if (home_row == 1 && (b & TRIANGLE) && home_folder_cursor < home_folder_count)
+        {
+            folder_menu_slot = home_folders[home_folder_cursor];
+            open_menu(2);
+            return;
+        }
         if (b & OPTIONS)
         {
             open_library(0);
@@ -1357,8 +1365,7 @@ void input(std::uint32_t b)
                 home_cursor++;
             if ((b & CROSS) && home_count)
             {
-                details_index = home_games[home_cursor];
-                modal = 5;
+                queue_launch(home_games[home_cursor]);
             }
             if ((b & TRIANGLE) && home_count)
                 open_menu(0);
@@ -1390,10 +1397,8 @@ void input(std::uint32_t b)
         }
         if (b & TRIANGLE)
         {
-            if (chosen_count())
+            if (filtered_count)
                 open_menu(0);
-            else
-                open_keyboard(1);
             return;
         }
         if (b & CIRCLE)
@@ -1436,17 +1441,17 @@ void input(std::uint32_t b)
         }
         if (b & LEFT)
         {
-            if (cursor % 4 == 0)
+            if (cursor % 6 == 0)
                 nav_focus = true;
             else
                 cursor--;
         }
-        if ((b & RIGHT) && cursor + 1 < filtered_count)
+        if ((b & RIGHT) && cursor % 6 < 5 && cursor + 1 < filtered_count)
             cursor++;
         if (b & UP)
-            cursor = cursor >= 4 ? cursor - 4 : cursor;
+            cursor = cursor >= 6 ? cursor - 6 : cursor;
         if (b & DOWN)
-            cursor = cursor + 4 < filtered_count ? cursor + 4 : cursor;
+            cursor = cursor + 6 < filtered_count ? cursor + 6 : cursor;
         if (b & SQUARE)
             selected[filtered[cursor]] = !selected[filtered[cursor]];
         if (b & CROSS)
@@ -1455,8 +1460,7 @@ void input(std::uint32_t b)
                 selected[filtered[cursor]] = !selected[filtered[cursor]];
             else
             {
-                details_index = filtered[cursor];
-                modal = 5;
+                queue_launch(filtered[cursor]);
             }
         }
         return;
@@ -1617,7 +1621,7 @@ void breadcrumb(char *out, std::size_t cap, int slot)
 void draw_top(Canvas &c)
 {
     text(c, 64, 28, "estante", 44, white, 260);
-    text(c, 265, 54, "0.3 dev", 24, muted, 130);
+    text(c, 265, 54, "0.3 r2", 24, muted, 130);
     const char *tabs[] = {"Início", "Biblioteca", "Coleções", "Ajustes"};
     unsigned xs[] = {430, 630, 890, 1130};
     for (int i = 0; i < 4; i++)
@@ -1631,113 +1635,109 @@ void draw_top(Canvas &c)
 }
 void draw_home(Canvas &c)
 {
-    int idx = home_count ? home_games[home_cursor] : -1;
-    auto *m = meta(idx);
-    text(c, 70, 145, home_has_recent ? "RECENTES E FIXADOS" : "SUA BIBLIOTECA, DO SEU JEITO", 24,
-         accent, 1150);
-    if (idx >= 0)
+    text(c, 76, 164, "Seus jogos", 44, white, 1000);
+    char position[80];
+    std::snprintf(position, sizeof position, "%d / %d", home_count ? home_cursor + 1 : 0,
+                  home_count);
+    text(c, 1650, 178, position, 28, muted, 190);
+    const int start = (home_cursor / 5) * 5;
+    unsigned x = 78;
+    for (int i = start; i < home_count && i < start + 5; i++)
     {
-        text(c, 70, 206, games[idx].name, 64, white, 1210);
-        int p = platform(games[idx], db);
-        char info[100];
-        std::snprintf(info, sizeof info, "%s  •  %s",
+        const bool current = i == home_cursor;
+        const unsigned edge = current ? 356 : 304, y = current ? 272 : 298;
+        artwork(c, home_games[i], x, y, edge, home_row == 0 && current);
+        if (!current)
+            text(c, x, y + edge + 22, games[home_games[i]].name, 24, muted, edge);
+        x += edge + 40;
+    }
+    if (home_count)
+    {
+        const int idx = home_games[home_cursor];
+        const auto *m = meta(idx);
+        text(c, 78, 694, games[idx].name, 44, white, 1310);
+        char detail[150];
+        const int p = platform(games[idx], db);
+        std::snprintf(detail, sizeof detail, "%s%s%s%s",
                       p == 2   ? "PlayStation 2"
                       : p == 4 ? "PlayStation 4"
                       : p == 5 ? "PlayStation 5"
                                : "Aplicativo",
-                      m ? statuses[m->status] : statuses[0]);
-        text(c, 74, 305, info, 28, muted, 1100);
-        pill(c, 74, 380, 250, "X  Abrir jogo", home_row == 0);
-        pill(c, 340, 380, 310, "Triângulo  Opções");
-        text(c, 74, 455,
-             home_has_recent ? "Últimas escolhas feitas por aqui."
-                             : "Fixe seus favoritos ou monte a lista do que quer jogar.",
-             24, muted, 1170);
-        artwork(c, idx, 1440, 145, 350, false);
+                      m && m->pinned ? "  ·  Fixado" : "", m && m->status ? "  ·  " : "",
+                      m && m->status ? statuses[m->status] : "");
+        text(c, 80, 756, detail, 28, muted, 1300);
     }
     else
     {
-        text(c, 70, 210, "Sua próxima história começa aqui.", 64, white, 1500);
-        text(c, 74, 325,
-             "Abra a Biblioteca para atualizar seus jogos e criar sua primeira coleção.", 32, muted,
-             1600);
-        pill(c, 74, 400, 370, "Options  Ver biblioteca", true);
+        text(c, 78, 324, "Sua biblioteca está vazia", 44, white, 1450);
+        text(c, 80, 400, "Atualize os jogos em Biblioteca > Options.", 28, muted, 1450);
     }
-    text(c, 70, 535, home_has_recent ? "Últimas escolhas e jogos fixados" : "Para descobrir", 32,
-         white, 1100);
-    int start = (home_cursor / 7) * 7;
-    for (int i = 0; i < 7 && start + i < home_count; i++)
-    {
-        unsigned x = 76 + i * 254;
-        int item = home_games[start + i];
-        artwork(c, item, x, 590, 204, home_row == 0 && start + i == home_cursor);
-        text(c, x, 807, games[item].name, 24,
-             home_row == 0 && start + i == home_cursor ? accent : white, 235);
-    }
-    text(c, 70, 861, "Suas coleções", 28, white, 600);
+    text(c, 78, 844, "Coleções", 28, muted, 1100);
     int cs = (home_folder_cursor / 4) * 4;
     for (int i = 0; i < 4 && cs + i <= home_folder_count; i++)
     {
-        unsigned x = 74 + i * 447;
+        unsigned fx = 78 + i * 447;
         bool focus = home_row == 1 && cs + i == home_folder_cursor;
+        if (focus)
+            c.rounded_rectangle(fx - 4, 898, 430, 94, 13, white);
+        c.rounded_rectangle(fx, 902, 422, 86, 9, panel);
         if (cs + i < home_folder_count)
-            collection_card(c, home_folders[cs + i], x, 910, 420, 112, focus);
-        else
         {
-            if (focus)
-                c.rounded_rectangle(x - 4, 906, 428, 120, 16, accent);
-            c.rounded_rectangle(x, 910, 420, 112, 12, panel);
-            text(c, x + 25, 927, "Ver todos os jogos >", 28, white, 370);
-            text(c, x + 25, 968, "Biblioteca completa", 24, muted, 370);
+            int slot = home_folders[cs + i];
+            char n[20];
+            std::snprintf(n, sizeof n, "%d", collection_size(slot));
+            text(c, fx + 22, 923, db.folders[slot].name, 28, white, 330);
+            text(c, fx + 358, 925, n, 24, muted, 52);
         }
+        else
+            text(c, fx + 22, 923, "Ver biblioteca  >", 28, white, 375);
     }
 }
 void draw_library(Canvas &c)
 {
-    text(c, 64, 143, "Biblioteca", 44, white, 350);
-    for (int i = 0; i < 12; i++)
-    {
-        unsigned y = 230 + i * 55;
-        if (query.view == i || (nav_focus && nav_cursor == i))
-            c.rounded_rectangle(48, y - 3, 285, 47, 10,
-                                nav_focus && nav_cursor == i ? accent : panel);
-        text(c, 66, y, views[i], 24,
-             nav_focus && nav_cursor == i ? bg
-             : query.view == i            ? white
-                                          : muted,
-             250);
-    }
     const char *name = query.view >= 100 ? db.folders[query.view - 100].name : views[query.view];
-    text(c, 380, 143, name, 44, white, 1100);
-    char detail[240];
-    std::snprintf(detail, sizeof detail, "%d jogos  •  %s%s%s", filtered_count, sorts[query.sort],
-                  query.text[0] ? "  •  Busca: " : "", query.text);
-    text(c, 382, 205, detail, 24, muted, 1400);
-    pill(c, 1490, 145, 350, "Triângulo  Buscar");
-    int start = (cursor / 8) * 8;
-    for (int i = 0; i < 8 && start + i < filtered_count; i++)
+    text(c, 76, 145, name, 44, white, 1250);
+    char detail[200];
+    std::snprintf(detail, sizeof detail, "%d jogos  ·  %s%s%s", filtered_count, sorts[query.sort],
+                  query.text[0] ? "  ·  " : "", query.text);
+    text(c, 78, 207, detail, 24, muted, 1600);
+    const int start = (cursor / 12) * 12;
+    for (int i = 0; i < 12 && start + i < filtered_count; i++)
     {
-        int pos = start + i, idx = filtered[pos];
-        unsigned x = 392 + (i % 4) * 365, y = 280 + (i / 4) * 335;
-        bool focus = !nav_focus && cursor == pos;
-        if (focus)
-            c.rounded_rectangle(x - 6, y - 6, 342, 322, 16, accent);
-        c.rounded_rectangle(x, y, 330, 310, 12, panel);
-        artwork(c, idx, x + 36, y + 10, 258);
-        text(c, x + 12, y + 271, games[idx].name, 24, focus ? accent : white, 305);
+        const int pos = start + i, idx = filtered[pos];
+        const unsigned x = 80 + (i % 6) * 296, y = 270 + (i / 6) * 314;
+        artwork(c, idx, x, y, 264, !nav_focus && cursor == pos);
         if (selected[idx])
-            pill(c, x + 238, y + 16, 78, "OK", true);
+            pill(c, x + 172, y + 12, 78, "OK", true);
     }
-    if (!filtered_count)
+    if (filtered_count)
+        text(c, 78, 908, games[filtered[cursor]].name, 32, white, 1470);
+    else
     {
-        text(c, 430, 385, "Nenhum jogo nesta seleção.", 44, white, 1200);
-        text(c, 432, 462, "Use Options para ajustar filtros ou atualizar a biblioteca.", 28, muted,
-             1250);
+        text(c, 80, 400, "Nenhum jogo nesta seleção", 44, white, 1500);
+        text(c, 80, 475, "Options: buscar, filtrar ou atualizar.", 28, muted, 1500);
     }
-    char status[160];
-    std::snprintf(status, sizeof status, "%d selecionados%s", chosen_count(),
-                  editing_collection >= 0 ? "  •  Escolhendo jogos para a coleção" : "");
-    text(c, 384, 963, status, 24, accent, 1400);
+    if (chosen_count() || editing_collection >= 0)
+    {
+        char status[120];
+        std::snprintf(status, sizeof status, "%d selecionados%s", chosen_count(),
+                      editing_collection >= 0 ? "  ·  Options para salvar" : "");
+        text(c, 78, 962, status, 24, accent, 1700);
+    }
+    if (nav_focus)
+    {
+        c.dim();
+        c.rectangle(32, 126, 470, 864, panel);
+        text(c, 60, 150, "Filtrar biblioteca", 32, white, 410);
+        for (int i = 0; i < 12; i++)
+        {
+            unsigned y = 220 + i * 59;
+            bool focus = nav_cursor == i;
+            if (focus)
+                c.rounded_rectangle(48, y - 3, 438, 51, 6, accent);
+            text(c, 66, y, views[i], 28, focus ? bg : white, 405);
+        }
+    }
 }
 void draw_collections(Canvas &c)
 {
@@ -1814,10 +1814,10 @@ void draw_modal(Canvas &c)
         auto *m = meta(idx);
         text(c, 848, 340, m ? statuses[m->status] : statuses[0], 28, accent, 650);
         text(c, 848, 395, "Sua escolha. Seu próximo jogo.", 28, muted, 650);
-        pill(c, 848, 500, 330, launch_pending ? "Abrindo…" : "X  Jogar", true);
-        pill(c, 848, 560, 360, "Triângulo  Organizar");
+        pill(c, 848, 500, 330, launch_pending ? "Abrindo…" : "×  Jogar", true);
+        pill(c, 848, 560, 360, "△  Organizar");
         text(c, 400, 760, games[idx].id, 28, muted, 1090);
-        text(c, 400, 830, "Círculo  Voltar", 28, white, 600);
+        text(c, 400, 830, "○  Voltar", 28, white, 600);
         return;
     }
     if (modal == 3)
@@ -1842,8 +1842,7 @@ void draw_modal(Canvas &c)
                                       : key,
                  32, focus ? bg : white, 82);
         }
-        text(c, 398, 812, "Options  Salvar   •   Quadrado  Apagar   •   Círculo  Voltar", 28, muted,
-             1100);
+        text(c, 398, 812, "Options  Salvar   •   □  Apagar   •   ○  Voltar", 28, muted, 1100);
         return;
     }
     if (modal == 4 || modal == 10)
@@ -1855,8 +1854,8 @@ void draw_modal(Canvas &c)
                         : "A organização atual será substituída pelo último backup.",
              28, muted, 1100);
         text(c, 400, 400, "Seus jogos e saves continuam onde estão.", 28, white, 1100);
-        pill(c, 400, 550, 330, "X  Confirmar", true);
-        text(c, 400, 650, "Círculo  Cancelar", 28, white, 900);
+        pill(c, 400, 550, 330, "×  Confirmar", true);
+        text(c, 400, 650, "○  Cancelar", 28, white, 900);
         return;
     }
     const char *title = modal == 1   ? (menu_kind == 0   ? "Este jogo / seleção"
@@ -1929,7 +1928,7 @@ void draw_modal(Canvas &c)
     }
     if (!total)
         text(c, 400, 350, "Crie uma coleção manual antes de adicionar jogos.", 28, muted, 1090);
-    text(c, 400, 861, "X  Escolher   •   Círculo  Voltar", 24, muted, 1050);
+    text(c, 400, 861, "×  Escolher   •   ○  Voltar", 24, muted, 1050);
 }
 std::uint64_t state_signature();
 void request_visible_cover()
@@ -1957,16 +1956,16 @@ void request_visible_cover()
     {
         if (home_count)
             add(home_games[home_cursor]);
-        int start = (home_cursor / 7) * 7;
-        for (int i = start; i < home_count && i < start + 7; i++)
+        int start = (home_cursor / 5) * 5;
+        for (int i = start; i < home_count && i < start + 5; i++)
             add(home_games[i]);
     }
     if (screen == 1)
     {
-        int start = (cursor / 8) * 8;
+        int start = (cursor / 12) * 12;
         if (filtered_count)
             add(filtered[cursor]);
-        for (int i = start; i < filtered_count && i < start + 8; i++)
+        for (int i = start; i < filtered_count && i < start + 12; i++)
             add(filtered[i]);
     }
     // Collection mosaics use the same bounded queue and never block navigation.
@@ -2095,23 +2094,22 @@ void draw(Canvas &c) noexcept
         draw_settings(c);
     if (!record_mode)
     {
-        if (screen != 0)
-        {
-            text(
-                c, 70, 1014,
-                screen == 1
-                    ? "L1/R1  Navegar  •  X  Detalhes  •  Quadrado  Selecionar  •  Triângulo  "
-                      "Buscar / Organizar  •  Options  Biblioteca"
-                    : "L1 / R1  Navegar   •   X  Abrir   •   Círculo  Voltar   •   Options  Opções",
-                24, muted, 1770);
-        }
-        else
-            text(c, 70, 1040,
-                 "L1 / R1  Navegar    •    Direcional  Explorar    •    X  Abrir    •    Options  "
-                 "Ver tudo",
-                 24, muted, 1770);
+        text(c, 78, 1031, "L1 / R1  Navegar", 24, muted, 300);
+        text(c, 420, 1031,
+             screen == 0 && home_row == 0 ? "×  Jogar"
+             : screen == 1 ? (editing_collection >= 0 ? "×  Selecionar" : "×  Jogar")
+                           : "×  Abrir",
+             24, white, 280);
+        text(c, 710, 1031, "△  Organizar", 24, muted, 300);
+        text(c, 1020, 1031,
+             screen == 1   ? "□  Selecionar"
+             : screen == 0 ? "□  Buscar"
+                           : "○  Voltar",
+             24, muted, 300);
+        text(c, 1370, 1031, screen == 0 ? "Options  Biblioteca" : "Options  Opções", 24, muted,
+             460);
         if (launch_pending || !storage_ok)
-            text(c, 70, screen == 0 ? 495 : 935,
+            text(c, 70, screen == 0 ? 804 : 935,
                  !storage_ok ? "Salvamento indisponível - confira o armazenamento do app."
                              : message,
                  24, Color::yellow, 1750);
@@ -2126,7 +2124,7 @@ void draw(Canvas &c) noexcept
 } // namespace
 int main()
 {
-    log("BOOT ESTANTE HOME PPSA99841");
+    log("BOOT ESTANTE FOCUS R2 PPSA99841");
     struct stat st
     {
     };

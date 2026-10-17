@@ -391,7 +391,7 @@ void load_font()
     std::fclose(f);
     std::uint32_t header[2]{};
     std::memcpy(header, bytes, 8);
-    if (!ok || header[0] != 0x46545345 || header[1] > 1200 ||
+    if (!ok || header[0] != 0x46545345 || header[1] > 4096 ||
         8 + header[1] * sizeof(FontGlyph) > static_cast<std::size_t>(n))
     {
         std::free(bytes);

@@ -63,7 +63,7 @@ int main(int argc, char **argv)
     if (argc < 2 || argc > 3)
         return 2;
     static std::uint32_t frame[0x1000000 / 4];
-    const char *names[] = {"Horizon Explorer",  "Grand Circuit",        "The Last Journey",
+    const char *names[] = {"Horizon Explorer",  "Ōkami™ – Edição ★",    "The Last Journey",
                            "Stellar Adventure", "Shadow of the Valley", "Racing Legends",
                            "Mountain Quest",    "Little Planet"};
     count = 8;
@@ -114,7 +114,7 @@ int main(int argc, char **argv)
     input(RIGHT);
     assert(cursor == 1);
     input(DOWN);
-    assert(cursor == 5);
+    assert(cursor == 7);
     input(UP);
     assert(cursor == 1);
     input(LEFT);
@@ -149,6 +149,19 @@ int main(int argc, char **argv)
     input(CIRCLE);
     assert(collection_parent == -1);
     set_screen(0);
+    input(CROSS);
+    assert(launch_pending && pending_kind == 4 && modal == 0);
+    launch_pending = false;
+    pending_kind = 0;
+    message_until = 0;
+    input(SQUARE);
+    assert(screen == 1 && modal == 3);
+    input(CIRCLE);
+    set_screen(0);
+    home_cursor = 5;
+    rebuild();
+    assert(home_cursor == 5);
+    home_cursor = 0;
     const char *mode = argc == 3 ? argv[2] : "home";
     if (!std::strcmp(mode, "library"))
     {
