@@ -1,6 +1,8 @@
 #include "library.hpp"
 #include "cJSON.h"
 #include <cstring>
+#include <cctype>
+#include <strings.h>
 #include <cstdio>
 namespace estante
 {
@@ -119,6 +121,117 @@ static int default_platform(const char *id)
         if (starts_with(id, prefix))
             return 2;
     return 1;
+}
+static std::uint32_t le32(const unsigned char *p)
+{
+    return static_cast<std::uint32_t>(p[0]) | static_cast<std::uint32_t>(p[1]) << 8 |
+           static_cast<std::uint32_t>(p[2]) << 16 | static_cast<std::uint32_t>(p[3]) << 24;
+}
+// Looks for `name` (without the ";1" version) in the directory whose extent starts at `lba`.
+static bool iso_find(const unsigned char *d, std::size_t n, std::uint32_t lba, std::uint32_t length,
+                     const char *name, std::uint32_t &out_lba, std::uint32_t &out_len)
+{
+    const std::size_t start = static_cast<std::size_t>(lba) * 2048;
+    if (start >= n || length > 65536)
+        return false;
+    const std::size_t end = start + length < n ? start + length : n;
+    const std::size_t want = std::strlen(name);
+    std::size_t pos = start;
+    while (pos + 34 <= end)
+    {
+        const unsigned rec = d[pos];
+        if (rec == 0)
+        {
+            pos = (pos / 2048 + 1) * 2048; // records never cross a sector
+            continue;
+        }
+        const unsigned name_len = d[pos + 32];
+        if (pos + rec > end || rec < 33 + name_len)
+            return false;
+        if (name_len >= want && !strncasecmp(reinterpret_cast<const char *>(d + pos + 33), name, want) &&
+            (name_len == want || d[pos + 33 + want] == ';'))
+        {
+            out_lba = le32(d + pos + 2);
+            out_len = le32(d + pos + 10);
+            return true;
+        }
+        pos += rec;
+    }
+    return false;
+}
+// The boot executable sits in the root directory named after the serial ("SLUS_200.62;1").
+static bool iso_root_serial(const unsigned char *d, std::size_t n, std::uint32_t lba, std::uint32_t length,
+                            char *out, std::size_t cap)
+{
+    const std::size_t start = static_cast<std::size_t>(lba) * 2048;
+    if (start >= n || length > 65536)
+        return false;
+    const std::size_t end = start + length < n ? start + length : n;
+    std::size_t pos = start;
+    while (pos + 34 <= end)
+    {
+        const unsigned rec = d[pos];
+        if (rec == 0)
+        {
+            pos = (pos / 2048 + 1) * 2048;
+            continue;
+        }
+        const unsigned name_len = d[pos + 32];
+        if (pos + rec > end || rec < 33 + name_len)
+            return false;
+        const unsigned char *nm = d + pos + 33;
+        if (name_len >= 11 && std::isupper(nm[0]) && std::isupper(nm[1]) && std::isupper(nm[2]) &&
+            std::isupper(nm[3]) && nm[4] == '_' && std::isdigit(nm[5]) && std::isdigit(nm[6]) &&
+            std::isdigit(nm[7]) && nm[8] == '.' && std::isdigit(nm[9]) && std::isdigit(nm[10]))
+        {
+            std::snprintf(out, cap, "%c%c%c%c-%c%c%c%c%c", nm[0], nm[1], nm[2], nm[3], nm[5], nm[6], nm[7],
+                          nm[9], nm[10]);
+            return true;
+        }
+        pos += rec;
+    }
+    return false;
+}
+bool iso_boot_serial(const unsigned char *d, std::size_t n, char *out, std::size_t cap)
+{
+    if (!d || !out || cap < 12 || n < 0x8000 + 2048 || std::memcmp(d + 0x8001, "CD001", 5) != 0)
+        return false;
+    const unsigned char *root = d + 0x8000 + 156;
+    if (iso_root_serial(d, n, le32(root + 2), le32(root + 10), out, cap))
+        return true;
+    std::uint32_t cnf_lba = 0, cnf_len = 0;
+    if (!iso_find(d, n, le32(root + 2), le32(root + 10), "SYSTEM.CNF", cnf_lba, cnf_len))
+        return false;
+    const std::size_t at = static_cast<std::size_t>(cnf_lba) * 2048;
+    if (at >= n)
+        return false;
+    const std::size_t len = at + (cnf_len < 1024 ? cnf_len : 1024) < n ? (cnf_len < 1024 ? cnf_len : 1024) : n - at;
+    // Line like: BOOT2 = cdrom0:\SLUS_206.24;1
+    for (std::size_t i = 0; i + 7 < len; i++)
+    {
+        if (strncasecmp(reinterpret_cast<const char *>(d + at + i), "cdrom0:", 7) != 0)
+            continue;
+        std::size_t j = i + 7;
+        while (j < len && (d[at + j] == '\\' || d[at + j] == '/'))
+            j++;
+        char letters[5]{};
+        int nl2 = 0;
+        while (j < len && nl2 < 4 && d[at + j] >= 'A' && d[at + j] <= 'z' && std::isalpha(d[at + j]))
+            letters[nl2++] = static_cast<char>(std::toupper(d[at + j++]));
+        char digits[8]{};
+        int nd = 0;
+        while (j < len && d[at + j] != ';' && d[at + j] > ' ' && nd < 7)
+        {
+            if (std::isdigit(d[at + j]))
+                digits[nd++] = static_cast<char>(d[at + j]);
+            j++;
+        }
+        if (nl2 != 4 || nd < 4)
+            return false;
+        std::snprintf(out, cap, "%s-%s", letters, digits);
+        return true;
+    }
+    return false;
 }
 int platform(const Game &g, const Library &d)
 {

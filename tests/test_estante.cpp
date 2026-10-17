@@ -11,6 +11,16 @@ int main(){
   auto plat=[&](const char*id){Game g{};std::snprintf(g.id,10,"%s",id);return platform(g,empty);};
   assert(plat("PPSA01575")==5&&plat("CUSA03507")==4&&plat("PPSA99203")==1&&plat("PPSA99841")==1);
   assert(plat("SLUS20624")==2&&plat("SLES54510")==2&&plat("ULUS10564")==2&&plat("FAKE00000")==1&&plat("PSPS69691")==1&&plat("PS2A1B2C3")==2);}
+ {
+  // Minimal ISO 9660 image: root directory at sector 20 holding the boot executable named after its serial.
+  static unsigned char iso[40*2048]; std::memset(iso,0,sizeof iso);
+  std::memcpy(iso+0x8001,"CD001",5);
+  unsigned char*root=iso+0x8000+156; root[2]=20; root[10]=0x00; root[11]=0x08; // lba 20, length 2048
+  unsigned char*rec=iso+20*2048; const char nm[]="SLUS_206.24;1"; rec[0]=static_cast<unsigned char>(33+sizeof nm-1); rec[32]=sizeof nm-1; std::memcpy(rec+33,nm,sizeof nm-1);
+  char serial[16]; assert(estante::iso_boot_serial(iso,sizeof iso,serial,sizeof serial)&&!std::strcmp(serial,"SLUS-20624"));
+  assert(!estante::iso_boot_serial(iso,100,serial,sizeof serial));
+  iso[0x8001]='X'; assert(!estante::iso_boot_serial(iso,sizeof iso,serial,sizeof serial));
+ }
  assert(valid_library(d));Game g{"CUSA12345","Teste"};assert(platform(g,d)==2);
  char* s=write_library(d);assert(s);Library copy{};assert(read_library(s,copy));cJSON_free(s);
  assert(copy.games[0].folders==7&&copy.games[0].favorite&&!copy.games[0].hidden);

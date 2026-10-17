@@ -40,6 +40,8 @@ struct Library
     int count;
 };
 bool valid_id(const char *);
+// Reads the PS2 boot serial ("SLUS-20624") from the start of an ISO 9660 image (SYSTEM.CNF).
+bool iso_boot_serial(const unsigned char *, std::size_t, char *, std::size_t);
 int read_catalog(const char *, Game *, int);
 bool read_library(const char *, Library &);
 char *write_library(const Library &);

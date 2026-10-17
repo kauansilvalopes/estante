@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <strings.h>
+#include <cctype>
 #include <cstdint>
 #include <pthread.h>
 #include <fcntl.h>
@@ -118,6 +119,15 @@ constexpr const char *ps2_games_dir = "/data/PCSX2/games";
 // First press on a PS2 image writes the start request ("armed"); a second press on the same image asks
 // Elf Arsenal to open PS5SX2. The player can also open PS5SX2 from the home screen after the first press.
 char ps2_armed_id[10]{};
+// Boot serial of each PS2 image ("SLUS-20624"), read once from the start of the image and remembered in
+// /download0/ps2-serials.txt. state: 0 not read yet, 1 serial known, 2 no serial. The serial names the
+// cover PS5SX2 already downloaded to /data/PCSX2/covers.
+char ps2_serial[max_games][12]{};
+unsigned char ps2_state[max_games]{};
+constexpr int ps2_cache_max = 256;
+char ps2_cache_name[ps2_cache_max][144]{}, ps2_cache_serial[ps2_cache_max][12]{};
+int ps2_cache_count = 0, ps2_job = -1;
+char ps2_job_name[144]{};
 std::uint32_t decoded_cover[cover_edge * cover_edge]{};
 bool cover_ok = false;
 std::uint64_t verify_at = 0;
@@ -450,7 +460,7 @@ bool cached_cover(const char *path, bool header)
     return !too_large && decode_cover(reinterpret_cast<unsigned char *>(response), response_size,
                                       decoded_cover, cover_edge);
 }
-bool http_get(const char *path)
+bool http_get(const char *path, std::size_t prefix = 0)
 {
     response[0] = 0;
     response_size = 0;
@@ -496,6 +506,17 @@ bool http_get(const char *path)
         if (n < 0)
             break;
         used += static_cast<std::size_t>(n);
+        if (prefix)
+        {
+            // Only the start of a big file is wanted: stop once enough of the body has arrived.
+            response[used] = 0;
+            const char *end = std::strstr(response, "\r\n\r\n");
+            if (end && used - static_cast<std::size_t>(end + 4 - response) >= prefix)
+            {
+                eof = true;
+                break;
+            }
+        }
     }
     sceNetSocketClose(s);
     response[used] = 0;
@@ -550,6 +571,8 @@ void *worker(void *)
             }
         }
     }
+    else if (work_kind == 8)
+        response_ok = http_get(request_path, 700000);
     else
         response_ok = http_get(request_path);
     work.store(2, std::memory_order_release);
@@ -656,6 +679,97 @@ bool ps2_image_name(const char *name, char *stem, std::size_t cap)
     }
     return false;
 }
+void save_ps2_cache()
+{
+    if (!storage_ok)
+        return;
+    static char text[ps2_cache_max * 170];
+    std::size_t used = 0;
+    for (int i = 0; i < ps2_cache_count && used + 170 < sizeof text; i++)
+        used += static_cast<std::size_t>(
+            std::snprintf(text + used, sizeof text - used, "%s|%s\n", ps2_cache_serial[i], ps2_cache_name[i]));
+    text[used] = 0;
+    write_file("/download0/ps2-serials.txt", text);
+}
+void load_ps2_cache()
+{
+    char *text = read_file("/download0/ps2-serials.txt");
+    if (!text)
+        return;
+    char *line = text;
+    while (*line && ps2_cache_count < ps2_cache_max)
+    {
+        char *end = std::strchr(line, '\n');
+        if (end)
+            *end = 0;
+        char *bar = std::strchr(line, '|');
+        if (bar && bar - line < 12 && std::strlen(bar + 1) < sizeof ps2_cache_name[0])
+        {
+            *bar = 0;
+            std::snprintf(ps2_cache_serial[ps2_cache_count], sizeof ps2_cache_serial[0], "%s", line);
+            std::snprintf(ps2_cache_name[ps2_cache_count], sizeof ps2_cache_name[0], "%s", bar + 1);
+            ps2_cache_count++;
+        }
+        if (!end)
+            break;
+        line = end + 1;
+    }
+    std::free(text);
+}
+// Percent-encodes everything except the characters Elf Arsenal accepts in a path as they are.
+void ps2_encode_path(const char *in, char *out, std::size_t cap)
+{
+    std::size_t o = 0;
+    for (const char *p = in; *p && o + 4 < cap; p++)
+    {
+        const unsigned char ch = static_cast<unsigned char>(*p);
+        if (std::isalnum(ch) || std::strchr("/._-()", ch))
+            out[o++] = static_cast<char>(ch);
+        else
+            o += static_cast<std::size_t>(std::snprintf(out + o, cap - o, "%%%02X", ch));
+    }
+    out[o] = 0;
+}
+// Next image whose serial has not been read yet: fills `path` for the worker and returns true.
+bool next_ps2_job(char *path, std::size_t cap)
+{
+    for (int i = 0; i < count; i++)
+    {
+        if (!ps2_file[i][0] || ps2_state[i] != 0)
+            continue;
+        char file[160], full[200];
+        std::snprintf(full, sizeof full, "%s/%s", ps2_games_dir, ps2_file[i]);
+        ps2_encode_path(full, file, sizeof file);
+        if (std::strlen(file) + 24 >= cap)
+        {
+            ps2_state[i] = 2; // name too long to ask for
+            continue;
+        }
+        ps2_job = i;
+        std::snprintf(ps2_job_name, sizeof ps2_job_name, "%s", ps2_file[i]);
+        std::snprintf(path, cap, "/api/fs/download?path=%s", file);
+        return true;
+    }
+    return false;
+}
+void finish_ps2_job(const char *serial)
+{
+    int slot = -1;
+    for (int i = 0; i < count; i++)
+        if (!std::strcmp(ps2_file[i], ps2_job_name))
+            slot = i;
+    if (slot < 0)
+        return;
+    std::snprintf(ps2_serial[slot], sizeof ps2_serial[0], "%s", serial ? serial : "");
+    ps2_state[slot] = serial ? 1 : 2;
+    if (ps2_cache_count < ps2_cache_max)
+    {
+        std::snprintf(ps2_cache_name[ps2_cache_count], sizeof ps2_cache_name[0], "%s", ps2_job_name);
+        std::snprintf(ps2_cache_serial[ps2_cache_count], sizeof ps2_cache_serial[0], "%s", serial ? serial : "-");
+        ps2_cache_count++;
+        save_ps2_cache();
+    }
+}
 // Adds the PS2 images listed by Elf Arsenal (/api/fs/list) after the catalog.
 void add_ps2_games(const char *json)
 {
@@ -667,11 +781,15 @@ void add_ps2_games(const char *json)
             {
                 games[j] = games[j + 1];
                 std::memcpy(ps2_file[j], ps2_file[j + 1], sizeof ps2_file[j]);
+                std::memcpy(ps2_serial[j], ps2_serial[j + 1], sizeof ps2_serial[j]);
+                ps2_state[j] = ps2_state[j + 1];
             }
             count--;
             i--;
         }
     std::memset(ps2_file[count], 0, sizeof(ps2_file[0]) * static_cast<std::size_t>(max_games - count));
+    std::memset(ps2_state + count, 0, static_cast<std::size_t>(max_games - count));
+    std::memset(ps2_serial[count], 0, sizeof(ps2_serial[0]) * static_cast<std::size_t>(max_games - count));
     cJSON *root = cJSON_Parse(json);
     const cJSON *list = root ? cJSON_GetObjectItemCaseSensitive(root, "entries") : nullptr;
     const cJSON *e = nullptr;
@@ -700,6 +818,13 @@ void add_ps2_games(const char *json)
         std::snprintf(games[count].id, sizeof games[count].id, "%s", id);
         std::snprintf(games[count].name, sizeof games[count].name, "%s", stem);
         std::snprintf(ps2_file[count], sizeof ps2_file[count], "%s", name->valuestring);
+        for (int c = 0; c < ps2_cache_count; c++)
+            if (!std::strcmp(ps2_cache_name[c], name->valuestring))
+            {
+                const bool known = std::strcmp(ps2_cache_serial[c], "-") != 0;
+                ps2_state[count] = known ? 1 : 2;
+                std::snprintf(ps2_serial[count], sizeof ps2_serial[0], "%s", known ? ps2_cache_serial[c] : "");
+            }
         count++;
     }
     cJSON_Delete(root);
@@ -723,6 +848,7 @@ void poll_work()
             std::memcpy(games, updated, sizeof games);
             count = n;
             std::memset(ps2_file, 0, sizeof ps2_file);
+            std::memset(ps2_state, 0, sizeof ps2_state);
             std::memset(selected, 0, sizeof selected);
             std::memset(played_last, 0, sizeof played_last);
             std::memset(played_seconds, 0, sizeof played_seconds);
@@ -756,7 +882,19 @@ void poll_work()
         {
             add_ps2_games(response);
             rebuild();
+            if (next_ps2_job(path, sizeof path))
+                next = 8;
         }
+    }
+    else if (work_kind == 8)
+    {
+        char serial[16];
+        const bool found = response_ok && iso_boot_serial(reinterpret_cast<const unsigned char *>(response),
+                                                          response_size, serial, sizeof serial);
+        finish_ps2_job(found ? serial : nullptr);
+        cover_version++;
+        if (next_ps2_job(path, sizeof path))
+            next = 8;
     }
     else if (work_kind == 3)
     {
@@ -2394,7 +2532,9 @@ void request_visible_cover()
     for (int k = 0; k < n; k++)
     {
         const char *id = games[wanted[k]].id;
-        if (is_ps2_id(id) || find_cover(id))
+        if (find_cover(id))
+            continue;
+        if (is_ps2_id(id) && ps2_state[wanted[k]] != 1)
             continue;
         bool failed = false;
         for (int i = 0; i < failed_cover_count; i++)
@@ -2403,8 +2543,12 @@ void request_visible_cover()
         if (failed)
             continue;
         std::snprintf(requested_cover, 10, "%s", id);
-        char path[80];
-        std::snprintf(path, 80, "/appdb/icon?id=%s", id);
+        char path[96];
+        if (is_ps2_id(id))
+            std::snprintf(path, sizeof path, "/api/fs/download?path=/data/PCSX2/covers/%s.jpg",
+                          ps2_serial[wanted[k]]);
+        else
+            std::snprintf(path, sizeof path, "/appdb/icon?id=%s", id);
         start_request(3, path);
         break;
     }
@@ -2569,6 +2713,7 @@ int main()
         }
     }
     detect_language();
+    load_ps2_cache();
     read_preferences();
     if (count < 0)
         count = 0;
