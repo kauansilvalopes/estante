@@ -1,6 +1,23 @@
 # Estante
 
 Organizador de biblioteca que roda no proprio PS5, com navegacao pelo controle.
+*A native PS5 library organizer with controller navigation, for jailbroken consoles.*
+
+**English:** Estante ("shelf" in Portuguese) runs on the console itself: a Home screen with recently played games, a Library with large covers, filters, search and sort, your own collections, favorites and hidden titles, left stick and touchpad support. The language (English or Portuguese) follows your PS5 system language. It needs ShadowMountPlus and Elf Arsenal (the app reads the game list and covers from its local API) and was only tested on firmware 11.60. Prototype: expect bugs. Downloads and install notes: [latest release](https://github.com/kauansilvalopes/estante/releases/tag/v0.2.0).
+
+## Screenshots
+
+Rendered by the real draw code on a PC with placeholder covers (no game art is bundled).
+
+| Home | Library |
+|---|---|
+| ![Home](docs/screenshots/home.png) | ![Library](docs/screenshots/library.png) |
+| **Filters (touchpad)** | **Collections** |
+| ![Filters](docs/screenshots/sidebar.png) | ![Collections](docs/screenshots/collections.png) |
+| **Game details** | **Organize menu** |
+| ![Details](docs/screenshots/details.png) | ![Menu](docs/screenshots/menu.png) |
+| **Apps** | **Settings** |
+| ![Apps](docs/screenshots/apps.png) | ![Settings](docs/screenshots/settings.png) |
 
 **Versão 0.3 em desenvolvimento.** Nova experiência nativa com quatro áreas:
 Início, Biblioteca, Coleções e Ajustes. A versão 0.3 iniciou no PS5 do autor (FW 11.60), abriu o controle e carregou o catálogo.

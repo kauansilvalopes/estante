@@ -82,17 +82,29 @@ int main(int argc, char **argv)
         for (unsigned y = 0; y < cover_edge; y++)
             for (unsigned x = 0; x < cover_edge; x++)
             {
-                unsigned rr = 20 + i * 13 + x / 8, gg = 40 + y / 4, bb = 90 + i * 15;
-                bool ridge = y > 160 + (static_cast<int>(x) % 120) / 2;
+                // Placeholder art: a different sky palette, horizon and sun per title.
+                static const unsigned sky[8][6] = {
+                    {250, 120, 80, 40, 20, 70},  {40, 160, 190, 10, 40, 90},
+                    {150, 60, 180, 30, 10, 80},  {240, 190, 90, 120, 40, 60},
+                    {60, 200, 140, 10, 60, 70},  {220, 80, 120, 40, 10, 60},
+                    {90, 120, 240, 10, 20, 100}, {250, 150, 60, 60, 20, 50}};
+                const unsigned *c = sky[i % 8];
+                unsigned t = y * 256 / cover_edge;
+                unsigned rr = c[0] + (c[3] - c[0]) * t / 256, gg = c[1] + (c[4] - c[1]) * t / 256,
+                          bb = c[2] + (c[5] - c[2]) * t / 256;
+                int dx = static_cast<int>(x) - (150 + i * 37 % 220), dy = static_cast<int>(y) - 170;
+                if (dx * dx + dy * dy < 62 * 62)
+                {
+                    rr = 255;
+                    gg = 235;
+                    bb = 190;
+                }
+                bool ridge = y > 300 + ((static_cast<int>(x) + i * 53) % (90 + i * 17)) / 3;
                 if (ridge)
                 {
-                    rr /= 2;
-                    gg /= 2;
-                    bb /= 2;
-                }
-                if ((x + i * 31) % 83 < 2 && (y + i * 17) % 47 < 2)
-                {
-                    rr = gg = bb = 220;
+                    rr = rr / 4 + 8;
+                    gg = gg / 4 + 10;
+                    bb = bb / 3 + 14;
                 }
                 art.pixels[y * cover_edge + x] =
                     0xff000000u | ((bb & 255) << 16) | ((gg & 255) << 8) | (rr & 255);
