@@ -3,8 +3,8 @@
 Organizador de biblioteca que roda no proprio PS5, com navegacao pelo controle.
 
 **Versão 0.3 em desenvolvimento.** Nova experiência nativa com quatro áreas:
-Início, Biblioteca, Coleções e Ajustes. A versão anterior foi executada no PS5 do autor;
-esta reformulação precisa de validação de uso no console, além dos testes host.
+Início, Biblioteca, Coleções e Ajustes. A versão 0.3 iniciou no PS5 do autor (FW 11.60), abriu o controle e carregou o catálogo.
+A fluidez, persistência após reabertura e lançamento de jogos ainda precisam de validação de uso.
 
 ## Nova experiência
 
