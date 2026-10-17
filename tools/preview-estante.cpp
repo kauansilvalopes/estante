@@ -14,6 +14,10 @@ extern "C"
     {
         return -1;
     }
+    int sceSystemServiceParamGetInt(int, int *)
+    {
+        return -1;
+    }
     int scePadInit()
     {
         return -1;

@@ -43,6 +43,7 @@ extern "C"
 {
     int sceUserServiceInitialize(const void *);
     int sceUserServiceGetInitialUser(int *);
+    int sceSystemServiceParamGetInt(int, int *);
     int scePadInit();
     int scePadOpen(int, int, int, const void *);
     int scePadRead(int, PadSample *, int);
@@ -248,6 +249,14 @@ void save_preferences()
                   i18n::language ? "en" : "pt");
     if (!write_file("/download0/estante-preferences.json", data))
         msg("Nao foi possivel salvar as preferencias.");
+}
+// PS5 system language: Brazilian Portuguese (17) and European Portuguese (7) get Portuguese,
+// everything else gets English. A saved preference overrides this.
+void detect_language()
+{
+    int value = 1;
+    if (sceSystemServiceParamGetInt(1, &value) == 0)
+        i18n::language = (value == 17 || value == 7) ? 0 : 1;
 }
 void read_preferences()
 {
@@ -2432,6 +2441,7 @@ int main()
             std::free(bundled);
         }
     }
+    detect_language();
     read_preferences();
     if (count < 0)
         count = 0;
