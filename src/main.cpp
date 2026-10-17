@@ -115,9 +115,9 @@ char requested_cover[10]{}, launch_id[10]{};
 // normal titles. The id is made up ("PS2" + hash) because an image has no title id.
 char ps2_file[max_games][144]{};
 constexpr const char *ps2_games_dir = "/data/PCSX2/games";
-// false: Estante only writes the start request and asks the player to open PS5SX2 from the home screen
-// (the way tested on the console). true: it also asks Elf Arsenal to open PS5SX2.
-constexpr bool ps2_open_from_estante = false;
+// First press on a PS2 image writes the start request ("armed"); a second press on the same image asks
+// Elf Arsenal to open PS5SX2. The player can also open PS5SX2 from the home screen after the first press.
+char ps2_armed_id[10]{};
 std::uint32_t decoded_cover[cover_edge * cover_edge]{};
 bool cover_ok = false;
 std::uint64_t verify_at = 0;
@@ -867,6 +867,17 @@ void poll_work()
 // PS5SX2 reads /data/PCSX2/logs/disc-launch.txt when it starts: first line is the image to play.
 void queue_ps2_launch(int idx)
 {
+    if (ps2_armed_id[0] && !std::strcmp(ps2_armed_id, games[idx].id))
+    {
+        // Second press: the request is already written, only PS5SX2 has to be opened.
+        ps2_armed_id[0] = 0;
+        std::snprintf(launch_id, 10, "PPSA99203");
+        launch_pending = true;
+        verify_at = 0;
+        msg("Verificando o console…");
+        start_request(4, "/api/state");
+        return;
+    }
     char request[200], file[160];
     std::snprintf(file, sizeof file, "/data/PCSX2/logs/disc-launch.txt");
     std::snprintf(request, sizeof request, "%s/%s\n", ps2_games_dir, ps2_file[idx]);
@@ -884,16 +895,8 @@ void queue_ps2_launch(int idx)
         if (storage_ok && persist(nextdb))
             rebuild();
     }
-    if (!ps2_open_from_estante)
-    {
-        msg("Pedido gravado. Abra o PS5SX2 pela tela inicial do PS5 e o jogo começa direto.");
-        return;
-    }
-    std::snprintf(launch_id, 10, "PPSA99203");
-    launch_pending = true;
-    verify_at = 0;
-    msg("Verificando o console…");
-    start_request(4, "/api/state");
+    std::snprintf(ps2_armed_id, sizeof ps2_armed_id, "%s", games[idx].id);
+    msg("Jogo carregado. Aperte × de novo para abrir o PS5SX2 (ou abra pela tela inicial).");
 }
 void queue_launch(int idx)
 {
