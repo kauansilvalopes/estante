@@ -104,6 +104,11 @@ int main(int argc, char **argv)
     db.folders[1] = {true, -1, "No sofá com amigos"};
     db.folders[2] = {true, -1, "Clássicos de sempre"};
     storage_ok = true;
+    i18n::language = 1;
+    assert(!std::strcmp(i18n::tr("Início"), "Home") && !std::strcmp(i18n::tr("nome do jogo"), "nome do jogo"));
+    i18n::language = 0;
+    assert(!std::strcmp(i18n::tr("Início"), "Início"));
+    i18n::language = 1;
     pad = 0;
     work.store(1);
     rebuild();
@@ -193,6 +198,52 @@ int main(int argc, char **argv)
     rebuild();
     assert(home_games[0] == 3 && home_games[1] == 1 && home_games[2] == 6);
     home_cursor = 0;
+    if (!std::strcmp(argc == 3 ? argv[2] : "", "i18n"))
+    {
+        // Walk every screen and modal in English and report text that has no translation.
+        i18n::on_miss = [](const char *t)
+        {
+            for (int i = 0; i < count; i++)
+                if (!std::strcmp(t, games[i].name) || !std::strcmp(t, games[i].id))
+                    return;
+            for (int i = 0; i < 32; i++)
+                if (db.folders[i].used && !std::strcmp(t, db.folders[i].name))
+                    return;
+            if (t[0] && !std::strstr(t, "PPSA") && std::strcmp(t, "estante") && std::strcmp(t, "0.4") &&
+                std::strcmp(t, "English") && !(t[0] >= '0' && t[0] <= '9'))
+                std::printf("UNTRANSLATED: [%s]\n", t);
+        };
+        auto canvas_i = Canvas::host_preview(frame);
+        for (int s = 0; s < 4; s++)
+        {
+            screen = s;
+            for (int m = 0; m <= 9; m++)
+            {
+                modal = m;
+                if (m == 1)
+                {
+                    open_menu(0);
+                    draw(canvas_i);
+                    open_menu(1);
+                }
+                if (m == 5)
+                    details_index = 0;
+                ui_version++;
+                draw(canvas_i);
+            }
+        }
+        modal = 0;
+        for (int v = 0; v < 12; v++)
+        {
+            screen = 1;
+            query.view = v;
+            rebuild();
+            ui_version++;
+            draw(canvas_i);
+        }
+        std::printf("i18n walk done\n");
+        return 0;
+    }
     const char *mode = argc == 3 ? argv[2] : "home";
     if (!std::strcmp(mode, "homemid"))
         home_cursor = 3;

@@ -3,6 +3,7 @@
 #include "demo_renderer.hpp"
 #include "library.hpp"
 #include "experience.hpp"
+#include "i18n.hpp"
 #include <algorithm>
 #include <ctime>
 #include "cJSON.h"
@@ -86,6 +87,7 @@ int pad = -1;
 std::uint32_t held = 0;
 std::uint64_t retry_pad = 0, repeat_at = 0;
 std::uint64_t message_until = 0;
+using i18n::tr;
 char message[180] = "Bem-vindo ao Estante", connection[96] = "Biblioteca local";
 struct Cover
 {
@@ -240,9 +242,10 @@ void save_preferences()
 {
     if (!storage_ok)
         return;
-    char data[100];
-    std::snprintf(data, sizeof data, "{\"largeText\":%s,\"recordMode\":%s}",
-                  large_text ? "true" : "false", record_mode ? "true" : "false");
+    char data[120];
+    std::snprintf(data, sizeof data, "{\"largeText\":%s,\"recordMode\":%s,\"lang\":\"%s\"}",
+                  large_text ? "true" : "false", record_mode ? "true" : "false",
+                  i18n::language ? "en" : "pt");
     if (!write_file("/download0/estante-preferences.json", data))
         msg("Nao foi possivel salvar as preferencias.");
 }
@@ -259,6 +262,9 @@ void read_preferences()
         large_text = cJSON_IsTrue(big);
     if (cJSON_IsBool(rec))
         record_mode = cJSON_IsTrue(rec);
+    auto *lang = cJSON_GetObjectItemCaseSensitive(root, "lang");
+    if (cJSON_IsString(lang) && lang->valuestring)
+        i18n::language = std::strcmp(lang->valuestring, "pt") ? 1 : 0;
     cJSON_Delete(root);
 }
 
@@ -963,6 +969,7 @@ enum Action
     TextSize,
     Pick,
     Export,
+    Language,
     RestoreConfirm
 };
 struct MenuItem
@@ -1128,6 +1135,11 @@ void action(Action a)
         break;
     case ClearSearch:
         clear_search();
+        break;
+    case Language:
+        i18n::language = !i18n::language;
+        ui_version++;
+        save_preferences();
         break;
     case NewFolder:
         open_keyboard(0);
@@ -1667,14 +1679,14 @@ void input(std::uint32_t b)
     if (screen == 3)
     {
         if (b & UP)
-            settings_cursor = (settings_cursor + 5) % 6;
+            settings_cursor = (settings_cursor + 6) % 7;
         if (b & DOWN)
-            settings_cursor = (settings_cursor + 1) % 6;
+            settings_cursor = (settings_cursor + 1) % 7;
         if (b & CIRCLE)
             set_screen(0);
         if (b & CROSS)
         {
-            Action actions[] = {TextSize, Record, Refresh, Export, Restore, NewFolder};
+            Action actions[] = {TextSize, Record, Refresh, Export, Restore, NewFolder, Language};
             action(actions[settings_cursor]);
         }
     }
@@ -1689,7 +1701,7 @@ void text(Canvas &c, unsigned x, unsigned y, const char *s, unsigned size = 28, 
 {
     if (large_text && size < 32)
         size = 32;
-    c.label(x, y, s, size, color, width);
+    c.label(x, y, tr(s), size, color, width);
 }
 void line(Canvas &c, unsigned x, unsigned y, unsigned width)
 {
@@ -1796,8 +1808,8 @@ void collection_card(Canvas &c, int slot, unsigned x, unsigned y, unsigned width
     unsigned tx = x + tile * 2 + 42;
     text(c, tx, y + 20, db.folders[slot].name, 32, white, width - (tx - x) - 16);
     char detail[90];
-    std::snprintf(detail, sizeof detail, "%d jogos%s", collection_size(slot),
-                  db.folders[slot].smart ? " • Automática" : "");
+    std::snprintf(detail, sizeof detail, tr("%d jogos%s"), collection_size(slot),
+                  db.folders[slot].smart ? tr(" • Automática") : "");
     text(c, tx, y + 68, detail, 24, muted, width - (tx - x) - 16);
     if (height > 160)
         text(c, tx, y + 125, db.folders[slot].pinned ? "Fixada no Início" : "Sua coleção", 24,
@@ -1811,7 +1823,7 @@ void breadcrumb(char *out, std::size_t cap, int slot)
         path[n++] = slot;
         slot = db.folders[slot].parent;
     }
-    std::snprintf(out, cap, "Coleções");
+    std::snprintf(out, cap, "%s", tr("Coleções"));
     for (int i = n - 1; i >= 0; i--)
     {
         std::size_t len = std::strlen(out);
@@ -1842,13 +1854,13 @@ void format_ago(std::uint64_t last, char *out, std::size_t cap)
         return;
     const std::uint64_t age = activity_now - last;
     if (age < 120)
-        std::snprintf(out, cap, "jogado agora há pouco");
+        std::snprintf(out, cap, "%s", tr("jogado agora há pouco"));
     else if (age < 3600)
-        std::snprintf(out, cap, "jogado há %u min", static_cast<unsigned>(age / 60));
+        std::snprintf(out, cap, tr("jogado há %u min"), static_cast<unsigned>(age / 60));
     else if (age < 86400)
-        std::snprintf(out, cap, "jogado há %u h", static_cast<unsigned>(age / 3600));
+        std::snprintf(out, cap, tr("jogado há %u h"), static_cast<unsigned>(age / 3600));
     else
-        std::snprintf(out, cap, "jogado há %u dias", static_cast<unsigned>(age / 86400));
+        std::snprintf(out, cap, tr("jogado há %u dias"), static_cast<unsigned>(age / 86400));
 }
 void format_playtime(std::uint32_t seconds, char *out, std::size_t cap)
 {
@@ -1856,18 +1868,19 @@ void format_playtime(std::uint32_t seconds, char *out, std::size_t cap)
     if (seconds < 60)
         return;
     if (seconds < 3600)
-        std::snprintf(out, cap, "%u min de jogo", seconds / 60);
+        std::snprintf(out, cap, tr("%u min de jogo"), seconds / 60);
     else
     {
         const unsigned hours = seconds / 3600, minutes = (seconds % 3600) / 60;
         if (hours >= 10 || !minutes)
-            std::snprintf(out, cap, "%u h de jogo", hours);
+            std::snprintf(out, cap, tr("%u h de jogo"), hours);
         else
-            std::snprintf(out, cap, "%u h %u min de jogo", hours, minutes);
+            std::snprintf(out, cap, tr("%u h %u min de jogo"), hours, minutes);
     }
 }
 void centered(Canvas &c, unsigned y, const char *s, unsigned size, Color color, unsigned max_width)
 {
+    s = tr(s);
     unsigned width = c.measure(s, size);
     if (width > max_width)
         width = max_width;
@@ -1911,9 +1924,9 @@ void draw_home(Canvas &c)
                       p == 2   ? "PlayStation 2"
                       : p == 4 ? "PlayStation 4"
                       : p == 5 ? "PlayStation 5"
-                               : "Aplicativo",
-                      m && m->pinned ? "  ·  Fixado" : "", m && m->status ? "  ·  " : "",
-                      m && m->status ? statuses[m->status] : "", ago[0] ? "  ·  " : "", ago,
+                               : tr("Aplicativo"),
+                      m && m->pinned ? tr("  ·  Fixado") : "", m && m->status ? "  ·  " : "",
+                      m && m->status ? tr(statuses[m->status]) : "", ago[0] ? "  ·  " : "", ago,
                       played[0] ? "  ·  " : "", played);
         centered(c, 840, detail, 28, muted, 1500);
     }
@@ -1928,7 +1941,7 @@ void draw_library(Canvas &c)
     const char *name = query.view >= 100 ? db.folders[query.view - 100].name : views[query.view];
     text(c, 76, 145, name, 44, white, 1250);
     char detail[200];
-    std::snprintf(detail, sizeof detail, "%d %s  ·  %s%s%s", filtered_count, query.view == 4 ? "apps" : "jogos", sorts[query.sort],
+    std::snprintf(detail, sizeof detail, "%d %s  ·  %s%s%s", filtered_count, query.view == 4 ? "apps" : tr("jogos"), tr(sorts[query.sort]),
                   query.text[0] ? "  ·  " : "", query.text);
     text(c, 78, 207, detail, 24, muted, 1600);
     const int start = (cursor / 12) * 12;
@@ -1957,8 +1970,8 @@ void draw_library(Canvas &c)
     if (chosen_count() || editing_collection >= 0)
     {
         char status[120];
-        std::snprintf(status, sizeof status, "%d selecionados%s", chosen_count(),
-                      editing_collection >= 0 ? "  ·  Options para salvar" : "");
+        std::snprintf(status, sizeof status, tr("%d selecionados%s"), chosen_count(),
+                      editing_collection >= 0 ? tr("  ·  Options para salvar") : "");
         text(c, 78, 962, status, 24, accent, 1700);
     }
     if (nav_focus)
@@ -2015,18 +2028,20 @@ void draw_settings(Canvas &c)
     text(c, 76, 238, "Preferências e cuidado com a sua biblioteca.", 28, muted, 1300);
     const char *names[] = {
         "Texto maior",          "Modo gravação",           "Atualizar biblioteca",
-        "Exportar organização", "Restaurar último backup", "Criar coleção"};
+        "Exportar organização", "Restaurar último backup", "Criar coleção",
+        "Idioma / Language"};
     const char *desc[] = {"Aumenta os textos menores da interface.",
                           "Esconde dicas e mensagens para capturas.",
                           "Consulta os jogos pelo Elf Arsenal local.",
                           "Salva uma cópia independente no armazenamento do app.",
                           "Recupera a organização anterior. Os jogos não são alterados.",
-                          "Comece uma seleção pessoal de jogos."};
-    for (int i = 0; i < 6; i++)
+                          "Comece uma seleção pessoal de jogos.",
+                          "Alterna entre português e inglês."};
+    for (int i = 0; i < 7; i++)
     {
-        unsigned y = 330 + i * 92;
+        unsigned y = 310 + i * 88;
         bool focus = i == settings_cursor;
-        c.rounded_rectangle(70, y, 1770, 80, 12, focus ? panel : bg);
+        c.rounded_rectangle(70, y, 1770, 76, 12, focus ? panel : bg);
         if (focus)
             c.rectangle(70, y + 12, 4, 56, accent);
         text(c, 96, y + 8, names[i], 32, white, 650);
@@ -2034,6 +2049,8 @@ void draw_settings(Canvas &c)
         if (i < 2)
             text(c, 570, y + 17, (i == 0 ? large_text : record_mode) ? "Ligado" : "Desligado", 24,
                  accent, 130);
+        if (i == 6)
+            text(c, 570, y + 17, i18n::language ? "English" : "Português", 24, accent, 130);
     }
 }
 void draw_modal(Canvas &c)
@@ -2140,17 +2157,17 @@ void draw_modal(Canvas &c)
     if (modal == 9)
     {
         total = 5;
-        std::snprintf(filterlabels[0], 120, "Plataforma: %s",
+        std::snprintf(filterlabels[0], 120, tr("Plataforma: %s"),
                       query.platform == 2   ? "PS2"
                       : query.platform == 4 ? "PS4"
                       : query.platform == 5 ? "PS5"
-                                            : "Todas");
-        std::snprintf(filterlabels[1], 120, "Progresso: %s",
-                      query.status ? statuses[query.status] : "Todos");
-        std::snprintf(filterlabels[2], 120, "Somente favoritos: %s",
-                      query.favorites ? "Sim" : "Não");
-        std::snprintf(filterlabels[3], 120, "Limpar filtros e busca");
-        std::snprintf(filterlabels[4], 120, "Ver resultados");
+                                            : tr("Todas"));
+        std::snprintf(filterlabels[1], 120, tr("Progresso: %s"),
+                      query.status ? tr(statuses[query.status]) : tr("Todos"));
+        std::snprintf(filterlabels[2], 120, tr("Somente favoritos: %s"),
+                      query.favorites ? tr("Sim") : tr("Não"));
+        std::snprintf(filterlabels[3], 120, "%s", tr("Limpar filtros e busca"));
+        std::snprintf(filterlabels[4], 120, "%s", tr("Ver resultados"));
         for (int i = 0; i < 5; i++)
             entries[i] = filterlabels[i];
     }
@@ -2281,6 +2298,7 @@ std::uint64_t state_signature()
     add(keyboard_cursor);
     add(record_mode);
     add(large_text);
+    add(i18n::language);
     add(pad < 0);
     add(storage_ok);
     add(launch_pending);
