@@ -30,9 +30,10 @@ extern "C"
     {
         return 0;
     }
+    std::uint64_t fake_process_time = 0;
     std::uint64_t sceKernelGetProcessTime()
     {
-        return 0;
+        return fake_process_time;
     }
     int sceKernelDebugOutText(int, const char *)
     {
@@ -186,7 +187,13 @@ int main(int argc, char **argv)
     assert(collection_parent == -1);
     set_screen(0);
     input(CROSS);
+    assert(anim_idx >= 0 && !launch_pending); // the launch animation runs first
+    input(CIRCLE);
+    assert(anim_idx < 0 && !launch_pending); // Circle cancels it
+    launch_anim_enabled = false;
+    input(CROSS);
     assert(launch_pending && pending_kind == 4 && modal == 0);
+    launch_anim_enabled = true;
     launch_pending = false;
     pending_kind = 0;
     message_until = 0;
@@ -296,6 +303,15 @@ int main(int argc, char **argv)
         rebuild();
         screen = 1;
     }
+    if (!std::strncmp(mode, "anim", 4))
+    {
+        // animN: N tenths of the way through the launch animation (anim0 ... anim10).
+        const int tenth = std::atoi(mode + 4);
+        fake_process_time = 5000000;
+        anim_idx = 3;
+        anim_start = fake_process_time - anim_length * static_cast<unsigned>(tenth) / 10;
+        screen = 0;
+    }
     if (!std::strcmp(mode, "sidebar"))
     {
         screen = 1;
@@ -345,6 +361,21 @@ int main(int argc, char **argv)
             std::printf("screen %d: %.2f ms/frame\n", target,
                         std::chrono::duration<double, std::milli>(t1 - t0).count() / 30.0);
         }
+        // Launch animation frame (full-screen gradient, cover, disc): timed with the clock moving.
+        anim_idx = 3;
+        fake_process_time = 9000000;
+        anim_start = fake_process_time - anim_length / 2;
+        draw(canvas);
+        const auto a0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < 30; i++)
+        {
+            fake_process_time += 16000;
+            anim_start = fake_process_time - anim_length / 2;
+            draw(canvas);
+        }
+        const auto a1 = std::chrono::steady_clock::now();
+        std::printf("launch animation: %.2f ms/frame\n",
+                    std::chrono::duration<double, std::milli>(a1 - a0).count() / 30.0);
         return 0;
     }
     draw(canvas);

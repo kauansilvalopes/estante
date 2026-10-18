@@ -15,6 +15,7 @@
 #include <cstring>
 #include <strings.h>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <pthread.h>
 #include <fcntl.h>
@@ -130,6 +131,11 @@ bool cover_ok = false;
 std::uint64_t verify_at = 0;
 int verify_attempts = 0;
 bool launch_pending = false;
+// Launch animation: the cover slides aside, a disc slides out and spins, then the request is sent.
+bool launch_anim_enabled = true;
+int anim_idx = -1;
+std::uint64_t anim_start = 0;
+constexpr std::uint64_t anim_length = 1300000; // microseconds
 std::uint64_t played_last[max_games]{}, activity_now = 0, activity_fetched = 0;
 std::uint32_t played_seconds[max_games]{};
 constexpr char keys[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -";
@@ -258,10 +264,10 @@ void save_preferences()
 {
     if (!storage_ok)
         return;
-    char data[120];
-    std::snprintf(data, sizeof data, "{\"largeText\":%s,\"recordMode\":%s,\"lang\":\"%s\"}",
+    char data[140];
+    std::snprintf(data, sizeof data, "{\"largeText\":%s,\"recordMode\":%s,\"lang\":\"%s\",\"anim\":%s}",
                   large_text ? "true" : "false", record_mode ? "true" : "false",
-                  i18n::language ? "en" : "pt");
+                  i18n::language ? "en" : "pt", launch_anim_enabled ? "true" : "false");
     if (!write_file("/download0/estante-preferences.json", data))
         msg("Nao foi possivel salvar as preferencias.");
 }
@@ -286,6 +292,9 @@ void read_preferences()
         large_text = cJSON_IsTrue(big);
     if (cJSON_IsBool(rec))
         record_mode = cJSON_IsTrue(rec);
+    auto *anim = cJSON_GetObjectItemCaseSensitive(root, "anim");
+    if (cJSON_IsBool(anim))
+        launch_anim_enabled = cJSON_IsTrue(anim);
     auto *lang = cJSON_GetObjectItemCaseSensitive(root, "lang");
     if (cJSON_IsString(lang) && lang->valuestring)
         i18n::language = std::strcmp(lang->valuestring, "pt") ? 1 : 0;
@@ -1009,7 +1018,7 @@ void queue_ps2_launch()
     msg("Verificando o console…");
     start_request(4, "/api/state");
 }
-void queue_launch(int idx)
+void start_launch(int idx)
 {
     if (idx < 0 || idx >= count || launch_pending)
         return;
@@ -1023,6 +1032,19 @@ void queue_launch(int idx)
     verify_at = 0;
     msg("Verificando o console…");
     start_request(4, "/api/state");
+}
+void queue_launch(int idx)
+{
+    if (idx < 0 || idx >= count || launch_pending || anim_idx >= 0)
+        return;
+    if (!launch_anim_enabled)
+    {
+        start_launch(idx);
+        return;
+    }
+    anim_idx = idx;
+    anim_start = sceKernelGetProcessTime();
+    ui_version++;
 }
 // Left stick as virtual d-pad presses: dominant axis only, with a dead zone around the centre.
 std::uint32_t stick_directions(unsigned x, unsigned y)
@@ -1216,6 +1238,7 @@ enum Action
     Pick,
     Export,
     Language,
+    Animation,
     RestoreConfirm
 };
 struct MenuItem
@@ -1387,6 +1410,11 @@ void action(Action a)
         ui_version++;
         save_preferences();
         break;
+    case Animation:
+        launch_anim_enabled = !launch_anim_enabled;
+        ui_version++;
+        save_preferences();
+        break;
     case NewFolder:
         open_keyboard(0);
         break;
@@ -1508,6 +1536,12 @@ void input(std::uint32_t b)
     if (!b)
         return;
     ui_version++;
+    if (anim_idx >= 0)
+    {
+        if (b & CIRCLE)
+            anim_idx = -1; // cancels the launch
+        return;
+    }
     if (b & R3)
     {
         action(Record);
@@ -1925,14 +1959,14 @@ void input(std::uint32_t b)
     if (screen == 3)
     {
         if (b & UP)
-            settings_cursor = (settings_cursor + 6) % 7;
+            settings_cursor = (settings_cursor + 7) % 8;
         if (b & DOWN)
-            settings_cursor = (settings_cursor + 1) % 7;
+            settings_cursor = (settings_cursor + 1) % 8;
         if (b & CIRCLE)
             set_screen(0);
         if (b & CROSS)
         {
-            Action actions[] = {TextSize, Record, Refresh, Export, Restore, NewFolder, Language};
+            Action actions[] = {TextSize, Record, Refresh, Export, Restore, NewFolder, Language, Animation};
             action(actions[settings_cursor]);
         }
     }
@@ -2276,15 +2310,16 @@ void draw_settings(Canvas &c)
     const char *names[] = {
         "Texto maior",          "Modo gravação",           "Atualizar biblioteca",
         "Exportar organização", "Restaurar último backup", "Criar coleção",
-        "Idioma / Language"};
+        "Idioma / Language",    "Animação ao abrir"};
     const char *desc[] = {"Aumenta os textos menores da interface.",
                           "Esconde dicas e mensagens para capturas.",
                           "Consulta os jogos pelo Elf Arsenal local.",
                           "Salva uma cópia independente no armazenamento do app.",
                           "Recupera a organização anterior. Os jogos não são alterados.",
                           "Comece uma seleção pessoal de jogos.",
-                          "Alterna entre português e inglês."};
-    for (int i = 0; i < 7; i++)
+                          "Alterna entre português e inglês.",
+                          "Mostra a capa e um disco girando antes de abrir o jogo."};
+    for (int i = 0; i < 8; i++)
     {
         unsigned y = 310 + i * 88;
         bool focus = i == settings_cursor;
@@ -2298,6 +2333,8 @@ void draw_settings(Canvas &c)
                  accent, 130);
         if (i == 6)
             text(c, 570, y + 17, i18n::language ? "English" : "Português", 24, accent, 130);
+        if (i == 7)
+            text(c, 570, y + 17, launch_anim_enabled ? "Ligado" : "Desligado", 24, accent, 130);
     }
 }
 void draw_modal(Canvas &c)
@@ -2552,6 +2589,7 @@ std::uint64_t state_signature()
     add(record_mode);
     add(large_text);
     add(i18n::language);
+    add(launch_anim_enabled);
     add(pad < 0);
     add(storage_ok);
     add(launch_pending);
@@ -2564,6 +2602,48 @@ std::uint64_t state_signature()
     for (const char *p = query.text; *p; p++)
         add(static_cast<unsigned char>(*p));
     return h;
+}
+// Full-screen launch scene: the focused game's cover moves left while a disc slides out from behind it and spins.
+void draw_launch_anim(Canvas &c, std::uint64_t elapsed)
+{
+    auto clamp01 = [](float v) { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; };
+    auto ease_out = [](float v) { return 1.0f - (1.0f - v) * (1.0f - v) * (1.0f - v); };
+    const float t = clamp01(static_cast<float>(elapsed) / static_cast<float>(anim_length));
+    const float slide = ease_out(clamp01(t * 1.7f));
+    const float out = ease_out(clamp01((t - 0.10f) / 0.65f));
+    const Cover *cover = find_cover(games[anim_idx].id);
+    const Color tint = cover ? static_cast<Color>(cover->tint) : accent;
+    c.gradient(0, 0, 1920, 1080, mix_color(tint, bg, 80), bg);
+    const unsigned edge = 420, cover_y = 250;
+    const unsigned cover_x = static_cast<unsigned>(750.0f - 330.0f * slide);
+    const int cy = static_cast<int>(cover_y + edge / 2);
+    const int disc_x = static_cast<int>(960.0f + 220.0f * out);
+    const unsigned radius = 190;
+    if (out > 0.0f)
+    {
+        c.circle(static_cast<unsigned>(disc_x), static_cast<unsigned>(cy), radius, shade(216, 220, 230));
+        c.circle(static_cast<unsigned>(disc_x), static_cast<unsigned>(cy), radius * 86 / 100,
+                 mix_color(tint, shade(190, 196, 210), 30));
+        c.circle(static_cast<unsigned>(disc_x), static_cast<unsigned>(cy), radius * 58 / 100, shade(206, 211, 224));
+        c.circle(static_cast<unsigned>(disc_x), static_cast<unsigned>(cy), radius * 32 / 100, shade(150, 156, 172));
+        // Sheen: three short arcs of dots that rotate with time (about 2.5 turns per second).
+        const float spin = static_cast<float>(elapsed) * 1.57e-5f;
+        for (int arm = 0; arm < 3; arm++)
+            for (int dot = 0; dot < 8; dot++)
+            {
+                const float a = spin + arm * 2.0944f + dot * 0.085f;
+                const float r = radius * 0.72f;
+                const unsigned level = static_cast<unsigned>(255 - dot * 12);
+                c.circle(static_cast<unsigned>(disc_x + static_cast<int>(r * std::cos(a))),
+                         static_cast<unsigned>(cy + static_cast<int>(r * std::sin(a))), 11, shade(level, level, level));
+            }
+        c.circle(static_cast<unsigned>(disc_x), static_cast<unsigned>(cy), radius * 13 / 100, bg);
+    }
+    artwork(c, anim_idx, cover_x, cover_y, edge, false);
+    centered(c, 790, games[anim_idx].name, 44, white, 1500);
+    centered(c, 860, "Abrindo…", 28, muted, 900);
+    if (!record_mode)
+        text(c, 78, 1031, "○  Cancelar", 24, muted, 300);
 }
 void draw(Canvas &c) noexcept
 {
@@ -2580,6 +2660,19 @@ void draw(Canvas &c) noexcept
         start_request(5, "/api/state");
     }
     request_visible_cover();
+    if (anim_idx >= 0)
+    {
+        const std::uint64_t elapsed = sceKernelGetProcessTime() - anim_start;
+        if (elapsed < anim_length)
+        {
+            draw_launch_anim(c, elapsed);
+            return;
+        }
+        const int idx = anim_idx;
+        anim_idx = -1;
+        ui_version++;
+        start_launch(idx);
+    }
     // The renderer keeps the finished frame in a cached buffer, so an unchanged state needs no redraw.
     static std::uint64_t previous = 0;
     const auto signature = state_signature();
