@@ -67,10 +67,10 @@ void run_gl(GlDrawScene draw) noexcept
     std::int64_t last_report = hui::sys::monotonic_us();
     for (;;)
     {
-        canvas.begin(&list, &renderer.batch(), &font, font_texture);
+        canvas.begin(&renderer.batch(), &font, font_texture);
         draw(canvas);
         renderer.begin();
-        renderer.draw(list);
+        canvas.submit(renderer);
         renderer.present(0, display.width(), display.height());
         if (!display.swap())
             fail("DISPLAY SWAP FAILED");

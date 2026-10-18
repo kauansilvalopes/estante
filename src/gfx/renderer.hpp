@@ -58,6 +58,9 @@ class Renderer
     void backdrop(const BackdropSpec &spec, float opacity = 1.0f);
     void draw(const DrawList &list);
     void glass();
+    // Runs fn(user, width, height) between the neighbouring layers (Estante's 3D pass). It owns the GL state it
+    // touches and must leave blending on and culling off.
+    void custom(void (*fn)(void *, int, int), void *user);
 
     // Draws the queued layers into framebuffer (0 is the display). The
     // virtual size is the coordinate space of the lists.
@@ -79,6 +82,7 @@ class Renderer
         backdrop,
         list,
         glass,
+        custom,
     };
     struct Layer
     {
@@ -86,6 +90,8 @@ class Renderer
         BackdropSpec spec;
         float opacity = 1.0f;
         const DrawList *list = nullptr;
+        void (*fn)(void *, int, int) = nullptr;
+        void *user = nullptr;
     };
 
     void play(const Layer &layer, int width, int height, float virtual_width, float virtual_height);

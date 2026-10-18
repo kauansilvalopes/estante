@@ -109,12 +109,28 @@ void Renderer::glass()
     layers_.push_back(layer);
 }
 
+void Renderer::custom(void (*fn)(void *, int, int), void *user)
+{
+    Layer layer;
+    layer.kind = Kind::custom;
+    layer.fn = fn;
+    layer.user = user;
+    layers_.push_back(layer);
+}
+
 void Renderer::play(const Layer &layer, int width, int height, float virtual_width,
                     float virtual_height)
 {
     if (layer.kind == Kind::backdrop)
     {
         backdrop_.draw(layer.spec, width, height, layer.opacity);
+        ++draw_calls_;
+    }
+    else if (layer.kind == Kind::custom)
+    {
+        if (width == kGlassWidth) // the small glass copy skips the 3D pass
+            return;
+        layer.fn(layer.user, width, height);
         ++draw_calls_;
     }
     else if (layer.kind == Kind::list)

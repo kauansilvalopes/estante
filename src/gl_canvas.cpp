@@ -33,14 +33,113 @@ bool is_shape_glyph(std::uint32_t cp) noexcept
 }
 } // namespace
 
-void GlCanvas::begin(hui::gfx::DrawList *list, hui::gfx::GlBatch *batch, const hui::gfx::Font *font,
-                     std::uint32_t font_texture) noexcept
+void GlCanvas::begin(hui::gfx::GlBatch *batch, const hui::gfx::Font *font, std::uint32_t font_texture) noexcept
 {
-    list_ = list;
     batch_ = batch;
     font_ = font;
     font_texture_ = font_texture;
+    if (!gl3d_tried_)
+    {
+        gl3d_tried_ = true;
+        items_.reserve(max_items);
+        if (gl3d_.init())
+            back_target_.create(back_width, back_height, 1);
+    }
+    items_.clear();
+    segment_ = 0;
+    list_ = &lists_[0];
     list_->clear();
+}
+
+void GlCanvas::split() noexcept
+{
+    segment_++;
+    list_ = &lists_[segment_];
+    list_->clear();
+}
+
+void GlCanvas::case3d(const CaseOp &op) noexcept
+{
+    if (!gl3d_.ready() || items_.size() >= max_items)
+        return;
+    Item item;
+    item.gl = &gl3d_;
+    item.kind = 0;
+    item.c = op;
+    items_.push_back(item);
+    split();
+}
+
+void GlCanvas::disc3d(const DiscOp &op) noexcept
+{
+    if (!gl3d_.ready() || items_.size() >= max_items)
+        return;
+    Item item;
+    item.gl = &gl3d_;
+    item.kind = 1;
+    item.d = op;
+    items_.push_back(item);
+    split();
+}
+
+void GlCanvas::run_item(void *user, int width, int height) noexcept
+{
+    auto *item = static_cast<Item *>(user);
+    if (item->kind == 2)
+    {
+        item->owner->render_back(width, height);
+        return;
+    }
+    item->gl->begin(width, height);
+    if (item->kind == 0)
+        item->gl->draw(item->c);
+    else
+        item->gl->draw(item->d);
+    item->gl->end();
+}
+
+void GlCanvas::begin_back() noexcept
+{
+    saved_list_ = list_;
+    back_list_.clear();
+    list_ = &back_list_;
+}
+
+void GlCanvas::end_back() noexcept
+{
+    list_ = saved_list_;
+    if (!gl3d_.ready() || items_.size() >= max_items)
+        return;
+    Item item;
+    item.gl = &gl3d_;
+    item.kind = 2;
+    item.owner = this;
+    items_.push_back(item);
+    split();
+}
+
+void GlCanvas::render_back(int width, int height) noexcept
+{
+    GLint previous = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
+    back_target_.bind();
+    glDisable(GL_SCISSOR_TEST);
+    glClearColor(0.04f, 0.05f, 0.06f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    batch_->draw(back_list_, hui::gfx::fit_viewport(back_width, back_height, back_width, back_height), back_width,
+                 back_height);
+    back_target_.unbind(static_cast<GLuint>(previous));
+    glViewport(0, 0, width, height);
+}
+
+void GlCanvas::submit(hui::gfx::Renderer &renderer) noexcept
+{
+    for (std::size_t i = 0; i <= segment_; i++)
+    {
+        renderer.draw(lists_[i]);
+        if (i < items_.size())
+            renderer.custom(&GlCanvas::run_item, &items_[i]);
+    }
 }
 
 void GlCanvas::clear(Color color) noexcept
@@ -96,14 +195,19 @@ void GlCanvas::circle(unsigned center_x, unsigned center_y, unsigned radius, Col
 
 std::uint32_t GlCanvas::texture_for(const std::uint32_t *pixels, unsigned edge) noexcept
 {
+    return texture_for(pixels, edge, edge);
+}
+
+std::uint32_t GlCanvas::texture_for(const std::uint32_t *pixels, unsigned width, unsigned height) noexcept
+{
     for (auto &t : textures_)
-        if (t.pixels == pixels && t.edge == edge)
+        if (t.pixels == pixels && t.edge == width && t.height == height)
         {
             if (t.dirty)
             {
                 const GLuint old = t.texture;
                 glDeleteTextures(1, &old);
-                t.texture = batch_->create_texture(static_cast<int>(edge), static_cast<int>(edge),
+                t.texture = batch_->create_texture(static_cast<int>(width), static_cast<int>(height),
                                                    reinterpret_cast<const std::uint8_t *>(pixels));
                 t.dirty = false;
             }
@@ -117,8 +221,9 @@ std::uint32_t GlCanvas::texture_for(const std::uint32_t *pixels, unsigned edge) 
     }
     CachedTexture t;
     t.pixels = pixels;
-    t.edge = edge;
-    t.texture = batch_->create_texture(static_cast<int>(edge), static_cast<int>(edge),
+    t.edge = width;
+    t.height = height;
+    t.texture = batch_->create_texture(static_cast<int>(width), static_cast<int>(height),
                                        reinterpret_cast<const std::uint8_t *>(pixels));
     textures_.push_back(t);
     return t.texture;

@@ -258,6 +258,11 @@ def upload(host, files):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--host", default="192.168.2.116", help="PS5 address (Elf Arsenal on 6969, FTP on 2121)")
     parser.add_argument("--port", type=int, default=6969)

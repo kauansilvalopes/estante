@@ -116,10 +116,10 @@ struct GlHost
     }
     void render()
     {
-        canvas.begin(&list, &renderer.batch(), &font, font_texture);
+        canvas.begin(&renderer.batch(), &font, font_texture);
         draw(canvas);
         renderer.begin();
-        renderer.draw(list);
+        canvas.submit(renderer);
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         renderer.present(fbo, 1920, 1080);
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -218,6 +218,12 @@ int main(int argc, char **argv)
                     0xff000000u | ((bb & 255) << 16) | ((gg & 255) << 8) | (rr & 255);
             }
         art.tint = average_pixels(art.pixels);
+#ifdef ESTANTE_GL
+        art.has_tall = true;
+        for (unsigned y = 0; y < tall_h; y++)
+            for (unsigned x = 0; x < tall_w; x++)
+                art.tall[y * tall_w + x] = art.pixels[(y * cover_edge / tall_h) * cover_edge + x * cover_edge / tall_w];
+#endif
         build_thumb(art.thumb, art.pixels);
         auto *m = metadata(db, games[i].id);
         m->lastChosen = 1000 - i;
@@ -428,6 +434,21 @@ int main(int argc, char **argv)
         home_cursor = 4;
         fake_process_time += 90000;
     }
+#ifdef ESTANTE_GL
+    if (!std::strncmp(mode, "back", 4))
+    {
+        // backN: the case has been turning toward its back for N tenths of a second.
+        home_cursor = 3;
+        fake_process_time = 5000000;
+        render_frame(preview_canvas(frame));
+        show_back = true;
+        for (int step = 0; step < std::atoi(mode + 4); step++)
+        {
+            fake_process_time += 100000;
+            render_frame(preview_canvas(frame));
+        }
+    }
+#endif
     if (!std::strncmp(mode, "theme", 5))
         apply_theme(std::atoi(mode + 5));
     if (!std::strcmp(mode, "sidebar"))

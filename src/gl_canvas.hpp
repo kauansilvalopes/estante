@@ -9,6 +9,8 @@
 #include "demo_renderer.hpp"
 #include "gfx/draw_list.hpp"
 #include "gfx/gl_batch.hpp"
+#include "gfx/renderer.hpp"
+#include "gl3d.hpp"
 
 #include <cstdint>
 #include <string_view>
@@ -21,9 +23,26 @@ class GlCanvas final
   public:
     using Color = ps5::demo::Color;
 
-    // Starts a frame: `list` is cleared and receives everything drawn until the next begin().
-    void begin(hui::gfx::DrawList *list, hui::gfx::GlBatch *batch, const hui::gfx::Font *font,
-               std::uint32_t font_texture) noexcept;
+    // Starts a frame: the draw lists are cleared and receive everything drawn until the next begin().
+    void begin(hui::gfx::GlBatch *batch, const hui::gfx::Font *font, std::uint32_t font_texture) noexcept;
+    // Queues the frame on the renderer: the 2D lists with the 3D cases and discs between them, in call order.
+    void submit(hui::gfx::Renderer &renderer) noexcept;
+    // A 3D shape drawn after everything recorded so far and before whatever is recorded next.
+    void case3d(const CaseOp &op) noexcept;
+    void disc3d(const DiscOp &op) noexcept;
+    // Draws the next calls into the 640x960 back-face picture of a case (y down, same calls as the screens use);
+    // end_back() queues the render. back_texture() is the picture, to be used with CaseOp::flip_back.
+    void begin_back() noexcept;
+    void end_back() noexcept;
+    std::uint32_t back_texture() const noexcept
+    {
+        return back_target_.texture();
+    }
+    static constexpr int back_width = 640, back_height = 960;
+    bool has_3d() const noexcept
+    {
+        return gl3d_.ready();
+    }
 
     void clear(Color color) noexcept;
     void dim() noexcept;
@@ -52,16 +71,38 @@ class GlCanvas final
         return *list_;
     }
     std::uint32_t texture_for(const std::uint32_t *pixels, unsigned edge) noexcept;
+    std::uint32_t texture_for(const std::uint32_t *pixels, unsigned width, unsigned height) noexcept;
 
   private:
     struct CachedTexture
     {
         const std::uint32_t *pixels = nullptr;
-        unsigned edge = 0;
+        unsigned edge = 0, height = 0;
         std::uint32_t texture = 0;
         bool dirty = false;
     };
 
+    struct Item
+    {
+        Gl3D *gl = nullptr;
+        int kind = 0; // 0 case, 1 disc, 2 render the back face
+        GlCanvas *owner = nullptr;
+        CaseOp c;
+        DiscOp d;
+    };
+    static void run_item(void *user, int width, int height) noexcept;
+    void split() noexcept;
+    void render_back(int width, int height) noexcept;
+
+    static constexpr std::size_t max_items = 30;
+    hui::gfx::DrawList lists_[max_items + 1];
+    std::vector<Item> items_;
+    std::size_t segment_ = 0;
+    Gl3D gl3d_;
+    hui::gfx::Canvas back_target_;
+    hui::gfx::DrawList back_list_;
+    hui::gfx::DrawList *saved_list_ = nullptr;
+    bool gl3d_tried_ = false;
     hui::gfx::DrawList *list_ = nullptr;
     hui::gfx::GlBatch *batch_ = nullptr;
     const hui::gfx::Font *font_ = nullptr;
