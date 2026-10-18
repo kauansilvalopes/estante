@@ -16,7 +16,26 @@ namespace estante
 namespace
 {
 constexpr const char *font_path = "/app0/assets/fonts/noto.huifont";
+const char *failure_reason = "";
+
+// Last resort when the GPU path cannot start: a still message drawn on the CPU, so the player sees why
+// instead of a black screen. The same text goes to the log (/download0/hui/dev/app.log, klog).
+void draw_failure(ps5::demo::Canvas &c) noexcept
+{
+    c.clear(ps5::demo::Color::background);
+    c.text(80, 90, "ESTANTE - GPU START FAILED", 5, ps5::demo::Color::white);
+    c.text(80, 190, failure_reason, 3, ps5::demo::Color::yellow);
+    c.text(80, 260, "CLOSE THE APP WITH THE PS BUTTON AND SEND", 3, ps5::demo::Color::white);
+    c.text(80, 300, "/DOWNLOAD0/HUI/DEV/APP.LOG TO THE DEVELOPER", 3, ps5::demo::Color::white);
 }
+
+[[noreturn]] void fail(const char *reason) noexcept
+{
+    hui::sys::log("[ESTANTE] gl: %s", reason);
+    failure_reason = reason;
+    ps5::demo::run(draw_failure, "estante gpu failure");
+}
+} // namespace
 
 void run_gl(GlDrawScene draw) noexcept
 {
@@ -31,18 +50,15 @@ void run_gl(GlDrawScene draw) noexcept
     {
         hui::sys::log("[ESTANTE] gl: display open failed (egl error %s)",
                       hui::ps5::egl_error_name(display.last_error()));
-        hui::sys::park();
+        fail("DISPLAY OPEN FAILED");
     }
     if (!renderer.init())
-    {
-        hui::sys::log("[ESTANTE] gl: renderer init failed");
-        hui::sys::park();
-    }
+        fail("RENDERER INIT FAILED");
     std::string bytes;
     if (!hui::save::read_file(font_path, &bytes) || !font.load(bytes))
     {
         hui::sys::log("[ESTANTE] gl: font %s failed: %s", font_path, font.error().c_str());
-        hui::sys::park();
+        fail("FONT LOAD FAILED");
     }
     const std::uint32_t font_texture = renderer.batch().create_font_texture(font);
     hui::sys::log("[ESTANTE] gl: ready %dx%d", display.width(), display.height());
@@ -57,10 +73,7 @@ void run_gl(GlDrawScene draw) noexcept
         renderer.draw(list);
         renderer.present(0, display.width(), display.height());
         if (!display.swap())
-        {
-            hui::sys::log("[ESTANTE] gl: swap failed");
-            hui::sys::park();
-        }
+            fail("DISPLAY SWAP FAILED");
         frames++;
         const std::int64_t now = hui::sys::monotonic_us();
         if (now - last_report >= 5000000)
