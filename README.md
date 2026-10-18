@@ -3,11 +3,11 @@
 Organizador de biblioteca que roda no proprio PS5, com navegacao pelo controle.
 *A native PS5 library organizer with controller navigation, for jailbroken consoles.*
 
-**English:** Estante ("shelf" in Portuguese) runs on the console itself: a Home screen with recently played games, a Library with large covers, filters, search and sort, your own collections, favorites and hidden titles, left stick and touchpad support. The language (English or Portuguese) follows your PS5 system language. It needs ShadowMountPlus and Elf Arsenal (the app reads the game list and covers from its local API) and was only tested on firmware 11.60. Prototype: expect bugs. Downloads and install notes: [latest release](https://github.com/kauansilvalopes/estante/releases/tag/v0.2.0).
+**English:** Estante ("shelf" in Portuguese) runs on the console itself: a Home screen with recently played games, a Library with large covers, filters, search and sort, your own collections, favorites and hidden titles, left stick and touchpad support. The language (English or Portuguese) follows your PS5 system language. It needs ShadowMountPlus and Elf Arsenal (the app reads the game list and covers from its local API) and was only tested on firmware 11.60. The interface is drawn on the console's GPU (OpenGL through the [ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) SDK and the renderer of [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui)): a cover flow with floor reflections that slides with a spring, a launch animation where the cover opens like a case and a disc rolls out, and four color themes. Prototype: expect bugs. Downloads and install notes: [latest release](https://github.com/kauansilvalopes/estante/releases/tag/v0.2.0).
 
 ## Screenshots
 
-Rendered by the real draw code on a PC with placeholder covers (no game art is bundled).
+Rendered by the real draw code through the GPU renderer on a PC (Mesa) with placeholder covers (no game art is bundled). Build: `make` fetches the pinned ps5-opengl SDK on its own; `bash tools/preview-estante-gl.sh` renders every screen on the PC.
 
 | Home | Library |
 |---|---|
