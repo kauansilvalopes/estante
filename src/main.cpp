@@ -2182,6 +2182,82 @@ void centered(Canvas &c, unsigned y, const char *s, unsigned size, Color color, 
         width = max_width;
     text(c, (1920 - width) / 2, y, s, size, color, max_width);
 }
+#ifdef ESTANTE_GL
+// GPU cover flow: positions are fractional, so the carousel slides with a spring when the cursor moves,
+// cards shrink and fade toward the sides, and each cover has a soft reflection on the floor below it.
+float flow_lerp(const float *table, float distance)
+{
+    if (distance >= 3.0f)
+        return table[3];
+    const int i = static_cast<int>(distance);
+    return table[i] + (table[i + 1] - table[i]) * (distance - static_cast<float>(i));
+}
+void draw_cover_flow(Canvas &c)
+{
+    static float position = -1000.0f;
+    static std::uint64_t last_time = 0;
+    const float target = static_cast<float>(home_cursor);
+    const std::uint64_t now = sceKernelGetProcessTime();
+    const float dt = last_time && now > last_time ? static_cast<float>(now - last_time) / 1.0e6f : 0.0f;
+    last_time = now;
+    if (position < -500.0f || target - position > 8.0f || position - target > 8.0f)
+        position = target;
+    else
+    {
+        // Critically damped feel: close the gap exponentially, about 90% in 170 ms.
+        const float k = 1.0f - std::exp(-13.5f * (dt > 0.05f ? 0.05f : dt));
+        position += (target - position) * k;
+        if (std::fabs(target - position) < 0.002f)
+            position = target;
+    }
+    static constexpr float centers[4] = {0.0f, 440.0f, 765.0f, 960.0f};
+    static constexpr float edges[4] = {470.0f, 340.0f, 250.0f, 190.0f};
+    const int first = static_cast<int>(std::floor(position)) - 3, last = static_cast<int>(std::ceil(position)) + 3;
+    for (int ring = 3; ring >= 0; ring--)
+        for (int i = first; i <= last; i++)
+        {
+            if (i < 0 || i >= home_count)
+                continue;
+            const float d = static_cast<float>(i) - position;
+            const float ad = d < 0 ? -d : d;
+            const int band = ad >= 3.0f ? 3 : static_cast<int>(ad + 0.5f);
+            if (band != ring || ad > 3.0f)
+                continue;
+            const float edge = flow_lerp(edges, ad);
+            const float center_x = 960.0f + (d < 0 ? -1.0f : 1.0f) * flow_lerp(centers, ad);
+            const float fade = ad <= 2.0f ? 1.0f : 1.0f - (ad - 2.0f);
+            const float x = center_x - edge / 2.0f, y = 500.0f - edge / 2.0f;
+            const bool focus = home_row == 0 && ad < 0.35f;
+            const unsigned radius = 20;
+            const int idx = home_games[i];
+            const Cover *cover = find_cover(games[idx].id);
+            if (cover)
+                const_cast<Cover *>(cover)->age = ++cover_clock;
+            c.list().shadow({x, y + 14.0f, edge, edge}, 22.0f, focus ? 34.0f : 22.0f,
+                            {0, 0, 0, (focus ? 0.66f : 0.47f) * fade});
+            if (focus)
+            {
+                const Color glow = cover ? mix_color(brighten(static_cast<Color>(cover->tint)), bg, 150)
+                                         : mix_color(accent, bg, 120);
+                c.rounded_rectangle(static_cast<unsigned>(x) - 11, static_cast<unsigned>(y) - 11,
+                                    static_cast<unsigned>(edge) + 22, static_cast<unsigned>(edge) + 22, radius + 11, glow);
+                c.rounded_rectangle(static_cast<unsigned>(x) - 4, static_cast<unsigned>(y) - 4,
+                                    static_cast<unsigned>(edge) + 8, static_cast<unsigned>(edge) + 8, radius + 4, white);
+            }
+            if (cover)
+            {
+                const std::uint32_t texture = c.texture_for(cover->pixels, cover_edge);
+                c.list().image(texture, {x, y, edge, edge}, hui::gfx::kFullUv, {1, 1, 1, fade}, static_cast<float>(radius));
+                // Reflection: the lower part of the cover, mirrored under it and fading out.
+                c.list().image_gradient(texture, {x, y + edge + 8.0f, edge, edge * 0.18f}, {0.0f, 1.0f, 1.0f, -0.18f},
+                                        {1, 1, 1, 0.28f * fade}, {1, 1, 1, 0.0f}, 6.0f);
+            }
+            else
+                c.rounded_rectangle(static_cast<unsigned>(x), static_cast<unsigned>(y), static_cast<unsigned>(edge),
+                                    static_cast<unsigned>(edge), radius, shade(38, 48, 59));
+        }
+}
+#endif
 void draw_home(Canvas &c)
 {
     const bool recents =
@@ -2193,6 +2269,9 @@ void draw_home(Canvas &c)
     text(c, 1650, 164, position, 28, muted, 190);
     if (home_count)
     {
+#ifdef ESTANTE_GL
+        draw_cover_flow(c);
+#else
         // Cover flow: the focused game is large and centred, neighbours shrink to each side.
         static constexpr int offsets[] = {-2, 2, -1, 1, 0};
         for (int offset : offsets)
@@ -2209,9 +2288,15 @@ void draw_home(Canvas &c)
                                               : 1600;
             artwork(c, home_games[i], x, 500 - edge / 2, edge, home_row == 0 && offset == 0);
         }
+#endif
         const int idx = home_games[home_cursor];
         const auto *m = meta(idx);
-        centered(c, 772, games[idx].name, 44, white, 1500);
+#ifdef ESTANTE_GL
+        constexpr unsigned name_y = 812, detail_y = 880; // below the floor reflection
+#else
+        constexpr unsigned name_y = 772, detail_y = 840;
+#endif
+        centered(c, name_y, games[idx].name, 44, white, 1500);
         char detail[220], ago[48], played[48];
         format_ago(played_last[idx], ago, sizeof ago);
         format_playtime(played_seconds[idx], played, sizeof played);
@@ -2224,7 +2309,7 @@ void draw_home(Canvas &c)
                       m && m->pinned ? tr("  ·  Fixado") : "", m && m->status ? "  ·  " : "",
                       m && m->status ? tr(statuses[m->status]) : "", ago[0] ? "  ·  " : "", ago,
                       played[0] ? "  ·  " : "", played);
-        centered(c, 840, detail, 28, muted, 1500);
+        centered(c, detail_y, detail, 28, muted, 1500);
     }
     else
     {
