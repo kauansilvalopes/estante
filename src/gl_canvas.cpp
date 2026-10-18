@@ -43,7 +43,10 @@ void GlCanvas::begin(hui::gfx::GlBatch *batch, const hui::gfx::Font *font, std::
         gl3d_tried_ = true;
         items_.reserve(max_items);
         if (gl3d_.init())
+        {
             back_target_.create(back_width, back_height, 1);
+            spine_target_.create(spine_width, spine_height, 1);
+        }
     }
     items_.clear();
     segment_ = 0;
@@ -90,6 +93,11 @@ void GlCanvas::run_item(void *user, int width, int height) noexcept
         item->owner->render_back(width, height);
         return;
     }
+    if (item->kind == 3)
+    {
+        item->owner->render_spine(width, height);
+        return;
+    }
     item->gl->begin(width, height);
     if (item->kind == 0)
         item->gl->draw(item->c);
@@ -118,18 +126,48 @@ void GlCanvas::end_back() noexcept
     split();
 }
 
-void GlCanvas::render_back(int width, int height) noexcept
+void GlCanvas::render_to(hui::gfx::Canvas &target, hui::gfx::DrawList &list, int w, int h, int width,
+                         int height) noexcept
 {
     GLint previous = 0;
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
-    back_target_.bind();
+    target.bind();
     glDisable(GL_SCISSOR_TEST);
     glClearColor(0.04f, 0.05f, 0.06f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    batch_->draw(back_list_, hui::gfx::fit_viewport(back_width, back_height, back_width, back_height), back_width,
-                 back_height);
-    back_target_.unbind(static_cast<GLuint>(previous));
+    batch_->draw(list, hui::gfx::fit_viewport(w, h, w, h), w, h);
+    target.unbind(static_cast<GLuint>(previous));
     glViewport(0, 0, width, height);
+}
+
+void GlCanvas::render_back(int width, int height) noexcept
+{
+    render_to(back_target_, back_list_, back_width, back_height, width, height);
+}
+
+void GlCanvas::render_spine(int width, int height) noexcept
+{
+    render_to(spine_target_, spine_list_, spine_width, spine_height, width, height);
+}
+
+void GlCanvas::begin_spine() noexcept
+{
+    saved_list_ = list_;
+    spine_list_.clear();
+    list_ = &spine_list_;
+}
+
+void GlCanvas::end_spine() noexcept
+{
+    list_ = saved_list_;
+    if (!gl3d_.ready() || items_.size() >= max_items)
+        return;
+    Item item;
+    item.gl = &gl3d_;
+    item.kind = 3;
+    item.owner = this;
+    items_.push_back(item);
+    split();
 }
 
 void GlCanvas::submit(hui::gfx::Renderer &renderer) noexcept

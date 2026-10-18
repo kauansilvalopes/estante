@@ -175,6 +175,12 @@ std::uint32_t decoded_cover[cover_edge * cover_edge]{};
 #ifdef ESTANTE_GL
 std::uint32_t decoded_tall[tall_w * tall_h]{};
 bool tall_ok = false;
+// One wide picture for the back of the focused case, fetched when the case is turned over.
+constexpr int wide_w = 480, wide_h = 270;
+std::uint32_t back_art[wide_w * wide_h]{}, decoded_wide[wide_w * wide_h]{};
+char back_art_id[10]{};
+int back_art_state = 0; // 0 nothing yet, 1 loading, 2 ready, 3 none for this game
+bool wide_ok = false;
 #endif
 bool cover_ok = false;
 std::uint64_t verify_at = 0;
@@ -643,6 +649,14 @@ void *worker(void *)
     }
     else if (work_kind == 8)
         response_ok = http_get(request_path, 700000);
+#ifdef ESTANTE_GL
+    else if (work_kind == 9)
+    {
+        response_ok = http_get(request_path);
+        wide_ok = response_ok && decode_cover_rect(reinterpret_cast<unsigned char *>(response), response_size,
+                                                   decoded_wide, wide_w, wide_h);
+    }
+#endif
     else
         response_ok = http_get(request_path);
     work.store(2, std::memory_order_release);
@@ -1004,6 +1018,20 @@ void poll_work()
             std::snprintf(failed_covers[failed_cover_count++], 10, "%s", requested_cover);
         cover_version++;
     }
+#ifdef ESTANTE_GL
+    else if (work_kind == 9)
+    {
+        if (wide_ok)
+        {
+            std::memcpy(back_art, decoded_wide, sizeof back_art);
+            back_art_state = 2;
+            if (gpu_canvas)
+                gpu_canvas->invalidate(back_art);
+        }
+        else
+            back_art_state = 3;
+    }
+#endif
     else if (work_kind == 4)
     {
         char active[10]{};
@@ -2272,22 +2300,34 @@ void draw_case_back(Canvas &c, int idx, const Cover *cover)
 {
     const auto *m = meta(idx);
     const Color tint = cover ? static_cast<Color>(cover->tint) : accent;
+    const bool art = back_art_state == 2 && !std::strcmp(back_art_id, games[idx].id);
+    const Color base = shade(14, 16, 22);
     c.begin_back();
-    c.gradient(0, 0, 640, 960, mix_color(tint, shade(18, 20, 27), 150), shade(14, 16, 22));
-    if (cover && cover->has_tall)
-        c.list().image(c.texture_for(cover->tall, tall_w, tall_h), {0, 0, 640, 960}, hui::gfx::kFullUv,
-                       {1, 1, 1, 0.13f}, 0.0f);
-    c.blend(0, 0, 640, 960, shade(11, 13, 18), 70);
-    c.rounded_rectangle(44, 56, 8, 112, 4, accent);
-    c.label(72, 50, games[idx].name, 44, white, 530);
+    c.gradient(0, 0, 640, 960, mix_color(tint, shade(18, 20, 27), 150), base);
+    if (art)
+    {
+        c.list().image(c.texture_for(back_art, wide_w, wide_h), {0, 0, 640, 360}, hui::gfx::kFullUv, {1, 1, 1, 1}, 0.0f);
+        c.gradient(0, 250, 640, 112, static_cast<Color>(static_cast<std::uint32_t>(base) & 0x00ffffffu), base);
+    }
+    else
+    {
+        if (cover && cover->has_tall)
+            c.list().image(c.texture_for(cover->tall, tall_w, tall_h), {0, 0, 640, 960}, hui::gfx::kFullUv,
+                           {1, 1, 1, 0.13f}, 0.0f);
+        c.blend(0, 0, 640, 960, shade(11, 13, 18), 70);
+    }
+    const unsigned top = art ? 372 : 50;
+    c.rounded_rectangle(44, top + 6, 8, 112, 4, accent);
+    c.label(72, top, games[idx].name, 44, white, 530);
     const int p = platform(games[idx], db);
-    c.label(72, 118, p == 2 ? "PlayStation 2" : p == 4 ? "PlayStation 4" : p == 5 ? "PlayStation 5" : tr("Aplicativo"),
+    c.label(72, top + 68, p == 2 ? "PlayStation 2" : p == 4 ? "PlayStation 4" : p == 5 ? "PlayStation 5" : tr("Aplicativo"),
             26, muted, 530);
-    c.rectangle(44, 196, 552, 2, mix_color(white, shade(12, 14, 19), 40));
+    const unsigned line = art ? 480 : 196, step = art ? 92 : 120, first = line + (art ? 14 : 34);
+    c.rectangle(44, line, 552, 2, mix_color(white, base, 40));
     auto row = [&](unsigned y, const char *label, const char *value, Color color)
     {
         c.label(44, y, tr(label), 22, muted, 552);
-        c.label(44, y + 32, value, 34, color, 552);
+        c.label(44, y + 30, value, 32, color, 552);
     };
     char played[48], ago[48], names[160];
     format_playtime(played_seconds[idx], played, sizeof played);
@@ -2300,14 +2340,26 @@ void draw_case_back(Canvas &c, int idx, const Cover *cover)
             if (len + std::strlen(db.folders[f].name) + 4 < sizeof names)
                 std::snprintf(names + len, sizeof names - len, "%s%s", len ? ", " : "", db.folders[f].name);
         }
-    row(230, "Tempo de jogo", played[0] ? played : tr("Sem tempo registrado"), white);
-    row(350, "Última vez", ago[0] ? ago : tr("Nunca jogado"), white);
-    row(470, "Status", tr(statuses[m ? m->status : 0]), m && m->status == 3 ? accent : white);
-    row(590, "Coleções", names[0] ? names : tr("Sem coleção"), white);
-    c.rectangle(44, 868, 552, 2, mix_color(white, shade(12, 14, 19), 40));
-    c.label(44, 890, games[idx].id, 24, muted, 300);
-    c.label(380, 890, "estante", 24, accent, 216);
+    row(first, "Tempo de jogo", played[0] ? played : tr("Sem tempo registrado"), white);
+    row(first + step, "Última vez", ago[0] ? ago : tr("Nunca jogado"), white);
+    row(first + step * 2, "Status", tr(statuses[m ? m->status : 0]), m && m->status == 3 ? accent : white);
+    row(first + step * 3, "Coleções", names[0] ? names : tr("Sem coleção"), white);
+    c.rectangle(44, 880, 552, 2, mix_color(white, base, 40));
+    c.label(44, 898, games[idx].id, 24, muted, 300);
+    c.label(380, 898, "estante", 24, accent, 216);
     c.end_back();
+}
+// The spine: the name runs down the left edge of the case.
+void draw_case_spine(Canvas &c, int idx, const Cover *cover)
+{
+    const Color tint = cover ? static_cast<Color>(cover->tint) : accent;
+    c.begin_spine();
+    c.gradient(0, 0, 960, 128, mix_color(tint, shade(18, 20, 27), 120), shade(12, 14, 19));
+    c.rectangle(0, 0, 14, 128, accent);
+    c.label(48, 30, games[idx].name, 56, white, 700);
+    const int p = platform(games[idx], db);
+    c.label(800, 38, p == 2 ? "PS2" : p == 4 ? "PS4" : p == 5 ? "PS5" : "APP", 44, accent, 140);
+    c.end_spine();
 }
 float flow_lerp(const float *table, float distance)
 {
@@ -2465,6 +2517,22 @@ void draw_cover_flow(Canvas &c)
                     op.side_g = 0.20f;
                     op.side_b = 0.25f;
                 }
+                if (i == home_cursor && show_back && back_art_state != 1 && work.load() == 0 &&
+                    (std::strcmp(back_art_id, games[idx].id) || back_art_state == 0) && !is_ps2_id(games[idx].id))
+                {
+                    std::snprintf(back_art_id, 10, "%s", games[idx].id);
+                    back_art_state = 1;
+                    char wide_path[120];
+                    std::snprintf(wide_path, sizeof wide_path, "/api/fs/download?path=/data/estante/covers/wide/%s.jpg",
+                                  games[idx].id);
+                    start_request(9, wide_path);
+                }
+                if (i == home_cursor)
+                {
+                    draw_case_spine(c, idx, cover);
+                    op.spine = c.spine_texture();
+                    op.shine = 0.55f;
+                }
                 if (i == home_cursor && back_amount > 0.001f)
                 {
                     draw_case_back(c, idx, cover);
@@ -2474,7 +2542,7 @@ void draw_cover_flow(Canvas &c)
                 CaseOp mirrored = op;
                 mirrored.reflection = true;
                 mirrored.floor_y = floor_y;
-                mirrored.fade_length = height * persp * 0.30f;
+                mirrored.fade_length = height * persp * 0.19f;
                 c.case3d(mirrored);
                 c.case3d(op);
                 if (recents && i == 0 && ad < 0.15f && back_amount < 0.05f && std::fabs(user_yaw) < 0.05f && flip >= 1.0f && fade > 0.5f)
@@ -2515,6 +2583,54 @@ void draw_cover_flow(Canvas &c)
                 text(c, static_cast<unsigned>(x) + 26, static_cast<unsigned>(y) + 17, "Continuar", 24, bg, 140);
             }
         }
+}
+// A case in the library grid. Returns false when there is no cover yet (the flat card is drawn instead).
+bool library_case(Canvas &c, int idx, int column, unsigned x, unsigned y, bool focus)
+{
+    const Cover *cover = idx >= 0 && idx < count ? find_cover(games[idx].id) : nullptr;
+    if (!cover || !c.has_3d())
+        return false;
+    const_cast<Cover *>(cover)->age = ++cover_clock;
+    const bool tall = cover->has_tall;
+    const float height = tall ? 296.0f : 264.0f, width = tall ? 198.0f : 264.0f;
+    const float cx = static_cast<float>(x) + 132.0f, cy = static_cast<float>(y) + 134.0f;
+    const float now_s = static_cast<float>(sceKernelGetProcessTime()) * 1.0e-6f;
+    float yaw = 0.0f;
+    float z = 0.0f, scale = 1.0f;
+    if (focus)
+    {
+        yaw = std::sin(now_s * 1.7f) * 0.32f;
+        z = 70.0f;
+        scale = 1.06f;
+    }
+    const float persp = (2015.0f - z) / 2015.0f;
+    const float wx = 960.0f + (cx - 960.0f) * persp, wy = 540.0f + (cy - 540.0f) * persp;
+    const float apparent = width * scale * (focus ? std::fabs(std::cos(yaw)) * 0.85f + 0.15f : 1.0f);
+    c.list().shadow({wx - apparent * 0.5f + 8.0f, wy - height * scale * 0.5f + 18.0f, apparent - 16.0f, height * scale - 22.0f}, 16.0f,
+                    focus ? 34.0f : 18.0f, {0, 0, 0, focus ? 0.62f : 0.46f});
+    if (focus)
+    {
+        hui::gfx::Color light = to_gfx(brighten(static_cast<Color>(cover->tint)));
+        light.a = 0.30f + 0.18f * (0.5f + 0.5f * std::sin(now_s * 2.6f));
+        c.list().glow({wx - apparent * 0.5f, wy - height * scale * 0.5f, apparent, height * scale}, 14.0f, 30.0f, light);
+    }
+    CaseOp op;
+    op.x = wx;
+    op.y = wy;
+    op.z = z;
+    op.width = width;
+    op.height = height;
+    op.depth = height * 0.10f;
+    op.scale = scale * persp;
+    op.yaw = yaw;
+    op.front = tall ? c.texture_for(cover->tall, tall_w, tall_h) : c.texture_for(cover->pixels, cover_edge);
+    const auto tint = static_cast<std::uint32_t>(cover->tint);
+    op.side_r = static_cast<float>(tint & 255) / 255.0f * 0.42f + 0.04f;
+    op.side_g = static_cast<float>((tint >> 8) & 255) / 255.0f * 0.42f + 0.04f;
+    op.side_b = static_cast<float>((tint >> 16) & 255) / 255.0f * 0.42f + 0.04f;
+    op.shine = focus ? 0.5f : 0.0f;
+    c.case3d(op);
+    return true;
 }
 #endif
 void draw_home(Canvas &c)
@@ -2593,10 +2709,15 @@ void draw_library(Canvas &c)
             if (current != (pass == 1))
                 continue;
             const unsigned x = 80 + (i % 6) * 296, y = 270 + (i / 6) * 314;
-            if (current)
-                artwork(c, idx, x - 10, y - 10, 284, true);
-            else
-                artwork(c, idx, x, y, 264, false);
+#ifdef ESTANTE_GL
+            if (!library_case(c, idx, i % 6, x, y, current))
+#endif
+            {
+                if (current)
+                    artwork(c, idx, x - 10, y - 10, 284, true);
+                else
+                    artwork(c, idx, x, y, 264, false);
+            }
             if (selected[idx])
                 pill(c, current ? x + 182 : x + 172, current ? y + 2 : y + 12, 78, "OK", true);
         }
@@ -3029,6 +3150,7 @@ void draw_launch_anim_gl(Canvas &c, std::uint64_t elapsed)
     disc.radius = radius;
     disc.spin = spin;
     disc.yaw = yaw * 0.6f;
+    disc.sheen = 0.38f;
     disc.label = cover ? c.texture_for(cover->pixels, cover_edge) : 0;
     const hui::gfx::Color silver = to_gfx(mix_color(tint, shade(222, 226, 236), 50));
     disc.tint_r = silver.r;

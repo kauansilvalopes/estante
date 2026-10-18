@@ -111,6 +111,9 @@ uniform int u_textured;
 uniform float u_ambient;
 uniform vec3 u_light;
 uniform vec2 u_fade;
+uniform float u_shine;
+uniform float u_sheen;
+uniform float u_spin;
 out vec4 frag;
 void main()
 {
@@ -120,6 +123,17 @@ void main()
     vec4 c = vec4(base.rgb * shade, base.a * u_color.a);
     if (u_textured != 0)
         c.rgb *= u_color.rgb;
+    if (u_shine > 0.0)
+    {
+        vec3 hv = normalize(normalize(u_light) + vec3(0.0, 0.0, 1.0));
+        c.rgb += vec3(pow(max(dot(normalize(v_normal), hv), 0.0), 36.0)) * u_shine;
+    }
+    if (u_sheen > 0.0)
+    {
+        vec2 q = v_uv - 0.5;
+        float band = pow(max(cos(2.0 * (atan(q.y, q.x) + u_spin)), 0.0), 10.0);
+        c.rgb += vec3(band) * u_sheen * (0.25 + length(q));
+    }
     if (u_fade.y > 0.0)
     {
         float f = clamp(1.0 - (v_y - u_fade.x) / u_fade.y, 0.0, 1.0);
@@ -144,14 +158,20 @@ bool Gl3D::init() noexcept
     u_fade_ = glGetUniformLocation(program_, "u_fade");
     u_light_ = glGetUniformLocation(program_, "u_light");
     u_flip_ = glGetUniformLocation(program_, "u_flip");
+    u_shine_ = glGetUniformLocation(program_, "u_shine");
+    u_sheen_ = glGetUniformLocation(program_, "u_sheen");
+    u_spin_ = glGetUniformLocation(program_, "u_spin");
 
     std::vector<Vertex> v;
-    auto quad = [&](const float p[4][3], float nx, float ny, float nz)
+    auto quad = [&](const float p[4][3], float nx, float ny, float nz, bool reversed = false)
     {
         static const float uv[4][2] = {{0, 0}, {0, 1}, {1, 1}, {1, 0}}; // TL, BL, BR, TR
-        const int order[6] = {0, 1, 2, 0, 2, 3};
-        for (int i : order)
+        const int order[6] = {0, 1, 2, 0, 2, 3}, flipped[6] = {0, 2, 1, 0, 3, 2};
+        for (int k = 0; k < 6; k++)
+        {
+            const int i = reversed ? flipped[k] : order[k];
             v.push_back({p[i][0], p[i][1], p[i][2], uv[i][0], uv[i][1], nx, ny, nz});
+        }
     };
     const float front[4][3] = {{-.5f, -.5f, .5f}, {-.5f, .5f, .5f}, {.5f, .5f, .5f}, {.5f, -.5f, .5f}};
     const float back[4][3] = {{.5f, -.5f, -.5f}, {.5f, .5f, -.5f}, {-.5f, .5f, -.5f}, {-.5f, -.5f, -.5f}};
@@ -164,15 +184,24 @@ bool Gl3D::init() noexcept
     box_front_ = 0;
     quad(back, 0, 0, -1);
     box_back_ = 6;
-    quad(left, -1, 0, 0);
+    quad(left, -1, 0, 0, true);
     box_sides_ = 12;
-    quad(right, 1, 0, 0);
-    quad(top, 0, -1, 0);
-    quad(bottom, 0, 1, 0);
+    quad(right, 1, 0, 0, true);
+    quad(top, 0, -1, 0, true);
+    quad(bottom, 0, 1, 0, true);
     box_sides_count_ = 24;
     cover_first_ = static_cast<int>(v.size());
     quad(tray, 0, 0, 1);
     cover_count_ = 6;
+    // The left edge of the case (the spine) as its own quad so a picture can run top to bottom along it.
+    spine_first_ = static_cast<int>(v.size());
+    {
+        const float pos[4][3] = {{-.5f, -.5f, .5f}, {-.5f, .5f, .5f}, {-.5f, .5f, -.5f}, {-.5f, -.5f, -.5f}};
+        const float uvs[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        const int order[6] = {0, 2, 1, 0, 3, 2};
+        for (int i : order)
+            v.push_back({pos[i][0], pos[i][1], pos[i][2], uvs[i][0], uvs[i][1], -1, 0, 0});
+    }
     disc_first_ = static_cast<int>(v.size());
     const int segments = 96;
     for (int i = 0; i < segments; i++)
@@ -265,6 +294,9 @@ void Gl3D::draw_range(const Mat4 &model, int first, int count, std::uint32_t tex
     glUniform1i(u_textured_, texture ? 1 : 0);
     glUniform1f(u_ambient_, 0.62f);
     glUniform1f(u_flip_, flip_);
+    glUniform1f(u_shine_, shine_);
+    glUniform1f(u_sheen_, sheen_);
+    glUniform1f(u_spin_, spin_);
     if (reflect)
         glUniform2f(u_fade_, reflect->floor_y, reflect->fade_length);
     else
@@ -306,7 +338,16 @@ void Gl3D::draw(const CaseOp &op) noexcept
         else
             draw_range(body, box_back_, 6, 0, op.side_r * k, op.side_g * k, op.side_b * k, a, fade);
         flip_ = 0.0f;
-        draw_range(body, box_sides_, box_sides_count_, 0, op.side_r * k, op.side_g * k, op.side_b * k, a, fade);
+        if (op.spine)
+        {
+            // Sides 12..17 are the left edge: replace it with the spine picture.
+            draw_range(body, box_sides_ + 6, box_sides_count_ - 6, 0, op.side_r * k, op.side_g * k, op.side_b * k, a, fade);
+            flip_ = 1.0f;
+            draw_range(body, spine_first_, 6, op.spine, k, k, k, a, fade);
+            flip_ = 0.0f;
+        }
+        else
+            draw_range(body, box_sides_, box_sides_count_, 0, op.side_r * k, op.side_g * k, op.side_b * k, a, fade);
         if (op.opening > 0.0f)
             draw_range(body, cover_first_, cover_count_, 0, 0.045f * k, 0.05f * k, 0.065f * k, a, fade);
     }
@@ -320,11 +361,13 @@ void Gl3D::draw(const CaseOp &op) noexcept
                                              mat4_multiply(mat4_rotate_y(-op.opening * 1.75f), mat4_translate(0.5f, 0, -0.5f)));
             door = mat4_multiply(place, mat4_multiply(mat4_scale(w, h, t), hinge));
         }
+        shine_ = op.reflection ? 0.0f : op.shine;
         if (op.front)
             draw_range(door, box_front_, 6, op.front, k, k, k, a, fade);
         else
             draw_range(door, box_front_, 6, 0, op.side_r * k * 1.6f, op.side_g * k * 1.6f, op.side_b * k * 1.6f, a, fade);
     }
+    shine_ = 0.0f;
     if (op.reflection)
         glFrontFace(GL_CCW);
 }
@@ -341,9 +384,12 @@ void Gl3D::draw(const DiscOp &op) noexcept
         draw_range(model, disc_first_, disc_count_, texture, r, g, b, op.alpha, nullptr);
     };
     const float R = op.radius;
+    sheen_ = op.sheen;
+    spin_ = op.spin;
     disc(R, 0, op.tint_r, op.tint_g, op.tint_b, 0.0f);              // silver rim
     disc(R * 0.93f, op.label, op.label ? 1.0f : op.tint_r * 0.8f, op.label ? 1.0f : op.tint_g * 0.8f,
          op.label ? 1.0f : op.tint_b * 0.8f, 0.4f); // printed label
+    sheen_ = 0.0f;
     disc(R * 0.30f, 0, op.tint_r * 0.9f, op.tint_g * 0.9f, op.tint_b * 0.92f, 0.8f); // clear hub
     disc(R * 0.12f, 0, op.hole_r, op.hole_g, op.hole_b, 1.2f);       // hole
 }

@@ -39,6 +39,14 @@ class GlCanvas final
         return back_target_.texture();
     }
     static constexpr int back_width = 640, back_height = 960;
+    // The same for the 960x128 spine picture (text runs along its width, top to bottom on the case).
+    void begin_spine() noexcept;
+    void end_spine() noexcept;
+    std::uint32_t spine_texture() const noexcept
+    {
+        return spine_target_.texture();
+    }
+    static constexpr int spine_width = 960, spine_height = 128;
     bool has_3d() const noexcept
     {
         return gl3d_.ready();
@@ -85,7 +93,7 @@ class GlCanvas final
     struct Item
     {
         Gl3D *gl = nullptr;
-        int kind = 0; // 0 case, 1 disc, 2 render the back face
+        int kind = 0; // 0 case, 1 disc, 2 render the back face, 3 render the spine
         GlCanvas *owner = nullptr;
         CaseOp c;
         DiscOp d;
@@ -93,13 +101,16 @@ class GlCanvas final
     static void run_item(void *user, int width, int height) noexcept;
     void split() noexcept;
     void render_back(int width, int height) noexcept;
+    void render_spine(int width, int height) noexcept;
+    void render_to(hui::gfx::Canvas &target, hui::gfx::DrawList &list, int w, int h, int width, int height) noexcept;
 
     static constexpr std::size_t max_items = 30;
     hui::gfx::DrawList lists_[max_items + 1];
     std::vector<Item> items_;
     std::size_t segment_ = 0;
     Gl3D gl3d_;
-    hui::gfx::Canvas back_target_;
+    hui::gfx::Canvas back_target_, spine_target_;
+    hui::gfx::DrawList spine_list_;
     hui::gfx::DrawList back_list_;
     hui::gfx::DrawList *saved_list_ = nullptr;
     bool gl3d_tried_ = false;

@@ -435,6 +435,19 @@ int main(int argc, char **argv)
         fake_process_time += 90000;
     }
 #ifdef ESTANTE_GL
+    if (!std::strncmp(mode, "turn", 4))
+    {
+        // turnN: the right stick held to the right for N frames of 100 ms.
+        home_cursor = 3;
+        fake_process_time = 5000000;
+        render_frame(preview_canvas(frame));
+        stick_rx = 1.0f;
+        for (int step = 0; step < std::atoi(mode + 4); step++)
+        {
+            fake_process_time += 100000;
+            render_frame(preview_canvas(frame));
+        }
+    }
     if (!std::strncmp(mode, "back", 4))
     {
         // backN: the case has been turning toward its back for N tenths of a second.
@@ -442,6 +455,14 @@ int main(int argc, char **argv)
         fake_process_time = 5000000;
         render_frame(preview_canvas(frame));
         show_back = true;
+        if (std::strcmp(mode, "back0") != 0 && std::strcmp(mode, "backnoart") != 0)
+        {
+            std::snprintf(back_art_id, 10, "%s", games[home_games[home_cursor]].id);
+            back_art_state = 2;
+            for (unsigned y = 0; y < wide_h; y++)
+                for (unsigned x = 0; x < wide_w; x++)
+                    back_art[y * wide_w + x] = 0xff000000u | ((60 + y / 2) << 16) | ((90 + x / 4) << 8) | (150 - y / 3);
+        }
         for (int step = 0; step < std::atoi(mode + 4); step++)
         {
             fake_process_time += 100000;

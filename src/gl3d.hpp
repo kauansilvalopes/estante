@@ -32,6 +32,8 @@ struct CaseOp
     float roll = 0.0f;                       // turn about the axis out of the screen
     float scale = 1.0f;
     std::uint32_t front = 0, back = 0;       // GL texture names (0 draws a flat colour)
+    std::uint32_t spine = 0;                 // picture for the left edge (rendered into a framebuffer)
+    float shine = 0.0f;                      // glint on the front that slides as the case turns
     bool flip_back = false;                  // the back texture was rendered into a framebuffer (rows upside down)
     float side_r = 0.10f, side_g = 0.11f, side_b = 0.13f;
     float alpha = 1.0f;
@@ -51,6 +53,7 @@ struct DiscOp
     float yaw = 0.0f;                        // tilt about the vertical axis
     std::uint32_t label = 0;
     float alpha = 1.0f;
+    float sheen = 0.0f;                      // the bright bands of a real disc, fixed while the disc spins
     float tint_r = 0.82f, tint_g = 0.84f, tint_b = 0.90f; // colour of the silver
     float hole_r = 0.06f, hole_g = 0.065f, hole_b = 0.08f; // what shows through the centre hole
 };
@@ -83,7 +86,9 @@ class Gl3D
     int surface_width_ = 1920, surface_height_ = 1080;
     Mat4 projection_{};
     // uniform locations
-    float flip_ = 0.0f;
+    float flip_ = 0.0f, shine_ = 0.0f, sheen_ = 0.0f, spin_ = 0.0f;
+    int u_shine_ = -1, u_sheen_ = -1, u_spin_ = -1;
+    int spine_first_ = 0;
     int u_flip_ = -1;
     int u_mvp_ = -1, u_model_ = -1, u_tex_ = -1, u_color_ = -1, u_textured_ = -1, u_ambient_ = -1, u_fade_ = -1,
         u_light_ = -1;
