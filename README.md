@@ -3,7 +3,7 @@
 Organizador de biblioteca que roda no proprio PS5, com navegacao pelo controle.
 *A native PS5 library organizer with controller navigation, for jailbroken consoles.*
 
-**English:** Estante ("shelf" in Portuguese) runs on the console itself: a Home screen with recently played games, a Library with large covers, filters, search and sort, your own collections, favorites and hidden titles, left stick and touchpad support. The language (English or Portuguese) follows your PS5 system language. It needs ShadowMountPlus and Elf Arsenal (the app reads the game list and covers from its local API) and was only tested on firmware 11.60. The interface is drawn on the console's GPU (OpenGL through the [ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) SDK and the renderer of [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui)): a cover flow with floor reflections that slides with a spring, a launch animation where the cover opens like a case and a disc rolls out, and four color themes. Prototype: expect bugs. Downloads and install notes: [latest release](https://github.com/kauansilvalopes/estante/releases/tag/v0.2.0).
+**English:** Estante ("shelf" in Portuguese) runs on the console itself: a Home screen with recently played games, a Library with large covers, filters, search and sort, your own collections, favorites and hidden titles, left stick and touchpad support. The language (English or Portuguese) follows your PS5 system language. It needs ShadowMountPlus and Elf Arsenal (the app reads the game list and covers from its local API) and was only tested on firmware 11.60. The interface is drawn on the console's GPU (OpenGL through the [ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) SDK and the renderer of [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui)): real 3D game cases in perspective (cover flow with floor reflections, a glint that follows the tilt, a spine with the game name), turned by hand with the right stick or flipped with R2/L2 to a back with your own data (play time, last played, status, collections) and a wide picture of the game, a launch animation where the case opens and the disc rolls out with the game's art on its label, and four color themes. Portrait covers come from the PC tool `tools/ps5_covers_sync.py`; without them the app uses the square icon. Prototype: expect bugs. Downloads and install notes: [latest release](https://github.com/kauansilvalopes/estante/releases/tag/v0.4.0).
 
 ## Screenshots
 
@@ -18,6 +18,10 @@ Rendered by the real draw code through the GPU renderer on a PC (Mesa) with plac
 | ![Details](docs/screenshots/details.png) | ![Menu](docs/screenshots/menu.png) |
 | **Apps** | **Settings** |
 | ![Apps](docs/screenshots/apps.png) | ![Settings](docs/screenshots/settings.png) |
+| **Case turned by the right stick (spine)** | **Back of the case (R2 / L2)** |
+| ![Spine](docs/screenshots/spine.png) | ![Back](docs/screenshots/back.png) |
+| **Launch: the case opens, the disc comes out** | |
+| ![Launch](docs/screenshots/launch.png) | |
 
 **Versão 0.3 em desenvolvimento.** Nova experiência nativa com quatro áreas:
 Início, Biblioteca, Coleções e Ajustes. A versão 0.3 iniciou no PS5 do autor (FW 11.60), abriu o controle e carregou o catálogo.
