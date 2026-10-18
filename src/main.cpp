@@ -29,6 +29,7 @@ using namespace estante;
 using Canvas = estante::GlCanvas; // the screens draw through the GPU canvas
 estante::GlCanvas *gpu_canvas = nullptr;
 bool show_back = false; // the focused case is turned to show its back (R2 / L2)
+float stick_rx = 0.0f, stick_ry = 0.0f; // right stick, -1..1: turns the focused case by hand
 #else
 using ps5::demo::Canvas;
 #endif
@@ -1163,6 +1164,16 @@ std::uint32_t buttons()
             samples[i].buttons | stick_directions(samples[i].analog[0], samples[i].analog[1]);
         pressed |= current & ~held;
         held = current;
+    }
+    if (n > 0)
+    {
+        auto axis = [](std::uint8_t v)
+        {
+            const float f = (static_cast<float>(v) - 128.0f) / 127.0f;
+            return f > -0.18f && f < 0.18f ? 0.0f : f;
+        };
+        stick_rx = axis(samples[n - 1].analog[2]);
+        stick_ry = axis(samples[n - 1].analog[3]);
     }
     if (pressed & (UP | DOWN | LEFT | RIGHT))
         repeat_at = now + 450000;
@@ -2319,6 +2330,31 @@ void draw_cover_flow(Canvas &c)
         last_cursor = home_cursor;
         show_back = false;
     }
+    static float user_yaw = 0.0f, user_pitch = 0.0f;
+    static int last_cursor_seen = -1;
+    {
+        // The right stick turns the focused case freely; let go and it eases back to rest.
+        const float step = last_time && now > last_time ? static_cast<float>(now - last_time) / 1.0e6f : 0.0f;
+        const float dts = step > 0.05f ? 0.05f : step;
+        if (home_cursor != last_cursor_seen)
+        {
+            last_cursor_seen = home_cursor;
+            user_yaw = user_pitch = 0.0f;
+        }
+        user_yaw += stick_rx * 3.6f * dts;
+        user_pitch += stick_ry * 2.2f * dts;
+        user_pitch = user_pitch < -0.7f ? -0.7f : user_pitch > 0.7f ? 0.7f : user_pitch;
+        if (stick_rx == 0.0f)
+        {
+            const float turn = 6.2831853f;
+            user_yaw -= turn * std::floor(user_yaw / turn + 0.5f); // nearest way home
+            user_yaw *= std::exp(-7.0f * dts);
+            if (std::fabs(user_yaw) < 0.002f)
+                user_yaw = 0.0f;
+        }
+        if (stick_ry == 0.0f)
+            user_pitch *= std::exp(-7.0f * dts);
+    }
     static float back_amount = 0.0f;
     {
         const float goal = show_back ? 1.0f : 0.0f;
@@ -2380,9 +2416,12 @@ void draw_cover_flow(Canvas &c)
                 const float persp = (2015.0f - z) / 2015.0f; // keeps the layout the same size on screen
                 const float world_x = 960.0f + (center_x - 960.0f) * persp;
                 const float world_y = 540.0f + (500.0f - 540.0f) * persp;
-                float yaw = -side * amount * 0.95f;
+                float yaw = -side * amount * 0.95f, pitch = 0.0f;
                 if (i == home_cursor)
-                    yaw += (1.0f - flip) * 0.9f * side * -1.0f + back_amount * 3.14159265f * side;
+                {
+                    yaw += (1.0f - flip) * 0.9f * side * -1.0f + back_amount * 3.14159265f * side + user_yaw;
+                    pitch = user_pitch;
+                }
                 const float apparent = case_width * persp * std::fabs(std::cos(yaw));
                 const float floor_y = world_y + height * persp * 0.5f + 12.0f;
                 const bool front_view = std::fabs(std::cos(yaw)) > 0.5f;
@@ -2406,6 +2445,7 @@ void draw_cover_flow(Canvas &c)
                 op.depth = height * 0.10f;
                 op.scale = persp;
                 op.yaw = yaw;
+                op.pitch = pitch;
                 if (cover)
                     op.front = tall ? c.texture_for(cover->tall, tall_w, tall_h) : c.texture_for(cover->pixels, cover_edge);
                 op.back = 0;
@@ -2437,7 +2477,7 @@ void draw_cover_flow(Canvas &c)
                 mirrored.fade_length = height * persp * 0.30f;
                 c.case3d(mirrored);
                 c.case3d(op);
-                if (recents && i == 0 && ad < 0.15f && back_amount < 0.05f && flip >= 1.0f && fade > 0.5f)
+                if (recents && i == 0 && ad < 0.15f && back_amount < 0.05f && std::fabs(user_yaw) < 0.05f && flip >= 1.0f && fade > 0.5f)
                 {
                     const float bx = world_x - apparent * 0.5f + 16.0f, by = world_y - height * persp * 0.5f + 16.0f;
                     c.rounded_rectangle(static_cast<unsigned>(bx), static_cast<unsigned>(by), 156, 38, 12, accent);

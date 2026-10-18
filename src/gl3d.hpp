@@ -28,6 +28,7 @@ struct CaseOp
     float x = 960.0f, y = 540.0f, z = 0.0f; // centre
     float width = 300.0f, height = 450.0f, depth = 56.0f;
     float yaw = 0.0f;                        // turn about the vertical axis, radians
+    float pitch = 0.0f;                      // tilt about the horizontal axis
     float roll = 0.0f;                       // turn about the axis out of the screen
     float scale = 1.0f;
     std::uint32_t front = 0, back = 0;       // GL texture names (0 draws a flat colour)

@@ -283,7 +283,7 @@ void Gl3D::draw(const CaseOp &op) noexcept
         return;
     const float s = op.scale;
     Mat4 place = mat4_multiply(mat4_translate(op.x, op.y, op.z),
-                               mat4_multiply(mat4_rotate_z(op.roll), mat4_rotate_y(op.yaw)));
+                               mat4_multiply(mat4_rotate_z(op.roll), mat4_multiply(mat4_rotate_x(op.pitch), mat4_rotate_y(op.yaw))));
     if (op.reflection)
     {
         // Mirror about the floor line: y' = 2 floor - y. The mirror flips the winding, so cull the other side.
