@@ -419,6 +419,17 @@ int main(int argc, char **argv)
         anim_start = fake_process_time - anim_length * static_cast<unsigned>(tenth) / 10;
         screen = 0;
     }
+    if (!std::strcmp(mode, "flip"))
+    {
+        // Renders a frame, then moves the cursor and renders again 90 ms later: the carousel is mid-slide.
+        home_cursor = 3;
+        fake_process_time = 5000000;
+        render_frame(preview_canvas(frame));
+        home_cursor = 4;
+        fake_process_time += 90000;
+    }
+    if (!std::strncmp(mode, "theme", 5))
+        apply_theme(std::atoi(mode + 5));
     if (!std::strcmp(mode, "sidebar"))
     {
         screen = 1;

@@ -69,9 +69,33 @@ extern "C"
 }
 namespace
 {
-constexpr Color bg = static_cast<Color>(0xff141110), panel = static_cast<Color>(0xff272220),
-                accent = static_cast<Color>(0xffffb153), muted = static_cast<Color>(0xffc9beb9),
-                white = Color::white;
+constexpr Color rgb_color(unsigned r, unsigned g, unsigned b)
+{
+    return static_cast<Color>(0xff000000u | (b << 16) | (g << 8) | r);
+}
+struct Theme
+{
+    const char *name;
+    Color bg, panel, accent, muted;
+};
+constexpr Theme themes[] = {
+    {"Midnight", rgb_color(16, 17, 20), rgb_color(32, 34, 39), rgb_color(83, 177, 255), rgb_color(185, 190, 201)},
+    {"Neon", rgb_color(14, 8, 26), rgb_color(34, 20, 58), rgb_color(255, 84, 200), rgb_color(198, 178, 226)},
+    {"Forest", rgb_color(9, 18, 14), rgb_color(22, 38, 31), rgb_color(110, 231, 160), rgb_color(166, 198, 182)},
+    {"Ember", rgb_color(23, 13, 10), rgb_color(46, 29, 22), rgb_color(255, 160, 64), rgb_color(214, 190, 170)},
+};
+constexpr int theme_count = 4;
+int theme_index = 0;
+Color bg = themes[0].bg, panel = themes[0].panel, accent = themes[0].accent, muted = themes[0].muted;
+constexpr Color white = Color::white;
+void apply_theme(int index)
+{
+    theme_index = ((index % theme_count) + theme_count) % theme_count;
+    bg = themes[theme_index].bg;
+    panel = themes[theme_index].panel;
+    accent = themes[theme_index].accent;
+    muted = themes[theme_index].muted;
+}
 constexpr std::uint32_t UP = 0x10, RIGHT = 0x20, DOWN = 0x40, LEFT = 0x80, L1 = 0x400, R1 = 0x800,
                         TRIANGLE = 0x1000, CIRCLE = 0x2000, CROSS = 0x4000, SQUARE = 0x8000,
                         OPTIONS = 0x8, R3 = 0x4, TOUCH = 0x100000;
@@ -272,10 +296,10 @@ void save_preferences()
 {
     if (!storage_ok)
         return;
-    char data[140];
-    std::snprintf(data, sizeof data, "{\"largeText\":%s,\"recordMode\":%s,\"lang\":\"%s\",\"anim\":%s}",
+    char data[160];
+    std::snprintf(data, sizeof data, "{\"largeText\":%s,\"recordMode\":%s,\"lang\":\"%s\",\"anim\":%s,\"theme\":%d}",
                   large_text ? "true" : "false", record_mode ? "true" : "false",
-                  i18n::language ? "en" : "pt", launch_anim_enabled ? "true" : "false");
+                  i18n::language ? "en" : "pt", launch_anim_enabled ? "true" : "false", theme_index);
     if (!write_file("/download0/estante-preferences.json", data))
         msg("Nao foi possivel salvar as preferencias.");
 }
@@ -300,6 +324,9 @@ void read_preferences()
         large_text = cJSON_IsTrue(big);
     if (cJSON_IsBool(rec))
         record_mode = cJSON_IsTrue(rec);
+    auto *theme = cJSON_GetObjectItemCaseSensitive(root, "theme");
+    if (cJSON_IsNumber(theme))
+        apply_theme(static_cast<int>(theme->valuedouble));
     auto *anim = cJSON_GetObjectItemCaseSensitive(root, "anim");
     if (cJSON_IsBool(anim))
         launch_anim_enabled = cJSON_IsTrue(anim);
@@ -1254,6 +1281,7 @@ enum Action
     Export,
     Language,
     Animation,
+    ThemeNext,
     RestoreConfirm
 };
 struct MenuItem
@@ -1427,6 +1455,11 @@ void action(Action a)
         break;
     case Animation:
         launch_anim_enabled = !launch_anim_enabled;
+        ui_version++;
+        save_preferences();
+        break;
+    case ThemeNext:
+        apply_theme(theme_index + 1);
         ui_version++;
         save_preferences();
         break;
@@ -1974,14 +2007,14 @@ void input(std::uint32_t b)
     if (screen == 3)
     {
         if (b & UP)
-            settings_cursor = (settings_cursor + 7) % 8;
+            settings_cursor = (settings_cursor + 8) % 9;
         if (b & DOWN)
-            settings_cursor = (settings_cursor + 1) % 8;
+            settings_cursor = (settings_cursor + 1) % 9;
         if (b & CIRCLE)
             set_screen(0);
         if (b & CROSS)
         {
-            Action actions[] = {TextSize, Record, Refresh, Export, Restore, NewFolder, Language, Animation};
+            Action actions[] = {TextSize, Record, Refresh, Export, Restore, NewFolder, Language, Animation, ThemeNext};
             action(actions[settings_cursor]);
         }
     }
@@ -2195,9 +2228,21 @@ float flow_lerp(const float *table, float distance)
 void draw_cover_flow(Canvas &c)
 {
     static float position = -1000.0f;
-    static std::uint64_t last_time = 0;
+    static std::uint64_t last_time = 0, flip_start = 0;
+    static int last_cursor = -1;
     const float target = static_cast<float>(home_cursor);
     const std::uint64_t now = sceKernelGetProcessTime();
+    if (home_cursor != last_cursor)
+    {
+        if (last_cursor >= 0)
+            flip_start = now; // the newly focused cover turns in like a card
+        last_cursor = home_cursor;
+    }
+    const float flip_t = flip_start && now > flip_start ? static_cast<float>(now - flip_start) / 260000.0f : 1.0f;
+    const float flip = flip_t >= 1.0f ? 1.0f : 1.0f - (1.0f - flip_t) * (1.0f - flip_t) * (1.0f - flip_t);
+    const float pulse = 0.5f + 0.5f * std::sin(static_cast<float>(now) * 2.6e-6f);
+    const bool recents = home_count && (played_last[home_games[0]] > 0 ||
+                                        (meta(home_games[0]) && meta(home_games[0])->lastChosen));
     const float dt = last_time && now > last_time ? static_cast<float>(now - last_time) / 1.0e6f : 0.0f;
     last_time = now;
     if (position < -500.0f || target - position > 8.0f || position - target > 8.0f)
@@ -2226,35 +2271,44 @@ void draw_cover_flow(Canvas &c)
             const float edge = flow_lerp(edges, ad);
             const float center_x = 960.0f + (d < 0 ? -1.0f : 1.0f) * flow_lerp(centers, ad);
             const float fade = ad <= 2.0f ? 1.0f : 1.0f - (ad - 2.0f);
-            const float x = center_x - edge / 2.0f, y = 500.0f - edge / 2.0f;
+            const float turn = i == home_cursor ? (flip < 0.12f ? 0.12f : flip) : 1.0f; // width while turning
+            const float width = edge * turn;
+            const float x = center_x - width / 2.0f, y = 500.0f - edge / 2.0f;
             const bool focus = home_row == 0 && ad < 0.35f;
             const unsigned radius = 20;
             const int idx = home_games[i];
             const Cover *cover = find_cover(games[idx].id);
             if (cover)
                 const_cast<Cover *>(cover)->age = ++cover_clock;
-            c.list().shadow({x, y + 14.0f, edge, edge}, 22.0f, focus ? 34.0f : 22.0f,
+            c.list().shadow({x, y + 14.0f, width, edge}, 22.0f, focus ? 34.0f : 22.0f,
                             {0, 0, 0, (focus ? 0.66f : 0.47f) * fade});
             if (focus)
             {
-                const Color glow = cover ? mix_color(brighten(static_cast<Color>(cover->tint)), bg, 150)
-                                         : mix_color(accent, bg, 120);
-                c.rounded_rectangle(static_cast<unsigned>(x) - 11, static_cast<unsigned>(y) - 11,
-                                    static_cast<unsigned>(edge) + 22, static_cast<unsigned>(edge) + 22, radius + 11, glow);
-                c.rounded_rectangle(static_cast<unsigned>(x) - 4, static_cast<unsigned>(y) - 4,
-                                    static_cast<unsigned>(edge) + 8, static_cast<unsigned>(edge) + 8, radius + 4, white);
+                // Pulsing light around the focused cover, then a crisp white ring.
+                const Color tint_color = cover ? brighten(static_cast<Color>(cover->tint)) : accent;
+                hui::gfx::Color light = to_gfx(tint_color);
+                light.a = 0.42f + 0.26f * pulse;
+                c.list().glow({x, y, width, edge}, static_cast<float>(radius), 30.0f + 10.0f * pulse, light);
+                c.list().bordered_rect({x - 5.0f, y - 5.0f, width + 10.0f, edge + 10.0f}, static_cast<float>(radius) + 5.0f,
+                                       {0, 0, 0, 0}, 4.0f, {1, 1, 1, 1});
             }
             if (cover)
             {
                 const std::uint32_t texture = c.texture_for(cover->pixels, cover_edge);
-                c.list().image(texture, {x, y, edge, edge}, hui::gfx::kFullUv, {1, 1, 1, fade}, static_cast<float>(radius));
+                c.list().image(texture, {x, y, width, edge}, hui::gfx::kFullUv, {1, 1, 1, fade}, static_cast<float>(radius));
                 // Reflection: the lower part of the cover, mirrored under it and fading out.
-                c.list().image_gradient(texture, {x, y + edge + 8.0f, edge, edge * 0.18f}, {0.0f, 1.0f, 1.0f, -0.18f},
+                c.list().image_gradient(texture, {x, y + edge + 8.0f, width, edge * 0.18f}, {0.0f, 1.0f, 1.0f, -0.18f},
                                         {1, 1, 1, 0.28f * fade}, {1, 1, 1, 0.0f}, 6.0f);
             }
             else
-                c.rounded_rectangle(static_cast<unsigned>(x), static_cast<unsigned>(y), static_cast<unsigned>(edge),
+                c.rounded_rectangle(static_cast<unsigned>(x), static_cast<unsigned>(y), static_cast<unsigned>(width),
                                     static_cast<unsigned>(edge), radius, shade(38, 48, 59));
+            if (recents && i == 0 && flip >= 1.0f && fade > 0.5f)
+            {
+                // The last game played: a badge to carry on where the player left off.
+                c.rounded_rectangle(static_cast<unsigned>(x) + 14, static_cast<unsigned>(y) + 14, 156, 38, 12, accent);
+                text(c, static_cast<unsigned>(x) + 26, static_cast<unsigned>(y) + 17, "Continuar", 24, bg, 140);
+            }
         }
 }
 #endif
@@ -2410,7 +2464,7 @@ void draw_settings(Canvas &c)
     const char *names[] = {
         "Texto maior",          "Modo gravação",           "Atualizar biblioteca",
         "Exportar organização", "Restaurar último backup", "Criar coleção",
-        "Idioma / Language",    "Animação ao abrir"};
+        "Idioma / Language",    "Animação ao abrir",       "Tema"};
     const char *desc[] = {"Aumenta os textos menores da interface.",
                           "Esconde dicas e mensagens para capturas.",
                           "Consulta os jogos pelo Elf Arsenal local.",
@@ -2418,14 +2472,15 @@ void draw_settings(Canvas &c)
                           "Recupera a organização anterior. Os jogos não são alterados.",
                           "Comece uma seleção pessoal de jogos.",
                           "Alterna entre português e inglês.",
-                          "Mostra a capa e um disco girando antes de abrir o jogo."};
-    for (int i = 0; i < 8; i++)
+                          "Mostra a capa e um disco girando antes de abrir o jogo.",
+                          "Troca as cores da interface."};
+    for (int i = 0; i < 9; i++)
     {
-        unsigned y = 310 + i * 88;
+        unsigned y = 282 + i * 78;
         bool focus = i == settings_cursor;
-        c.rounded_rectangle(70, y, 1770, 76, 12, focus ? panel : bg);
+        c.rounded_rectangle(70, y, 1770, 68, 12, focus ? panel : bg);
         if (focus)
-            c.rectangle(70, y + 12, 4, 56, accent);
+            c.rectangle(70, y + 10, 4, 48, accent);
         text(c, 96, y + 8, names[i], 32, white, 650);
         text(c, 710, y + 20, desc[i], 24, muted, 1050);
         if (i < 2)
@@ -2435,6 +2490,8 @@ void draw_settings(Canvas &c)
             text(c, 570, y + 17, i18n::language ? "English" : "Português", 24, accent, 130);
         if (i == 7)
             text(c, 570, y + 17, launch_anim_enabled ? "Ligado" : "Desligado", 24, accent, 130);
+        if (i == 8)
+            text(c, 570, y + 17, themes[theme_index].name, 24, accent, 130);
     }
 }
 void draw_modal(Canvas &c)
@@ -2690,6 +2747,7 @@ std::uint64_t state_signature()
     add(large_text);
     add(i18n::language);
     add(launch_anim_enabled);
+    add(theme_index);
     add(pad < 0);
     add(storage_ok);
     add(launch_pending);
@@ -2703,9 +2761,68 @@ std::uint64_t state_signature()
         add(static_cast<unsigned char>(*p));
     return h;
 }
+#ifdef ESTANTE_GL
+// GPU launch scene: the cover is the door of a jewel case. It swings open on its left hinge, the disc inside
+// slides out to the right and spins, then the game opens.
+void draw_launch_anim_gl(Canvas &c, std::uint64_t elapsed)
+{
+    auto clamp01 = [](float v) { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; };
+    auto ease_out = [](float v) { return 1.0f - (1.0f - v) * (1.0f - v) * (1.0f - v); };
+    const float t = clamp01(static_cast<float>(elapsed) / static_cast<float>(anim_length));
+    const float slide = ease_out(clamp01(t * 1.6f));
+    const float door = ease_out(clamp01(t / 0.38f));
+    const float out = ease_out(clamp01((t - 0.30f) / 0.55f));
+    const Cover *cover = find_cover(games[anim_idx].id);
+    const Color tint = cover ? static_cast<Color>(cover->tint) : accent;
+    c.gradient(0, 0, 1920, 1080, mix_color(tint, bg, 80), bg);
+    auto &list = c.list();
+    const float edge = 420.0f, y = 250.0f;
+    const float x = 750.0f - 330.0f * slide;
+    const float cx = x + edge * 0.5f, cy = y + edge * 0.5f;
+    // The case: body, the tray the disc rests in, and the hinge.
+    list.shadow({x - 12.0f, y + 12.0f, edge + 24.0f, edge + 20.0f}, 30.0f, 44.0f, {0, 0, 0, 0.62f});
+    list.rounded_rect({x - 12.0f, y - 10.0f, edge + 24.0f, edge + 20.0f}, 26.0f, {0.09f, 0.10f, 0.12f, 1});
+    list.rounded_rect({x + 14.0f, y + 14.0f, edge - 28.0f, edge - 28.0f}, 16.0f, {0.05f, 0.055f, 0.07f, 1});
+    // The disc: it sits in the tray, then rolls out of the case.
+    const float dx = cx + out * (edge * 0.5f + 215.0f);
+    const float radius = 185.0f;
+    const float spin = static_cast<float>(elapsed) * 1.57e-5f;
+    const hui::gfx::Color tint_light = to_gfx(mix_color(tint, shade(220, 224, 234), 40));
+    list.shadow({dx - radius, cy - radius + 10.0f, radius * 2.0f, radius * 2.0f}, radius, 26.0f, {0, 0, 0, 0.45f});
+    list.circle(dx, cy, radius, {0.85f, 0.87f, 0.91f, 1});
+    list.circle(dx, cy, radius * 0.86f, hui::gfx::mix(tint_light, {0.72f, 0.74f, 0.80f, 1}, 0.55f));
+    list.circle(dx, cy, radius * 0.58f, {0.80f, 0.82f, 0.88f, 1});
+    list.circle(dx, cy, radius * 0.32f, {0.59f, 0.61f, 0.68f, 1});
+    for (int arm = 0; arm < 3; arm++)
+        list.arc(dx, cy, radius * 0.86f, radius * 0.30f, spin + static_cast<float>(arm) * 2.0944f, 0.55f,
+                 {1, 1, 1, 0.50f}, true);
+    list.ring(dx, cy, radius - 2.0f, 3.0f, {1, 1, 1, 0.55f});
+    list.circle(dx, cy, radius * 0.13f, to_gfx(bg));
+    // The door: the cover, narrowing as it swings away from the viewer, darker the further it turns.
+    const float angle = door * 1.32f;
+    const float width = edge * std::cos(angle);
+    const float shade_level = 1.0f - 0.55f * std::sin(angle);
+    if (cover)
+    {
+        const std::uint32_t texture = c.texture_for(cover->pixels, cover_edge);
+        list.image(texture, {x, y, width, edge}, hui::gfx::kFullUv, {shade_level, shade_level, shade_level, 1}, 20.0f);
+    }
+    else
+        list.rounded_rect({x, y, width, edge}, 20.0f, {0.15f * shade_level, 0.19f * shade_level, 0.23f * shade_level, 1});
+    list.rounded_rect({x - 12.0f, y - 10.0f, 16.0f, edge + 20.0f}, 8.0f, {0.17f, 0.18f, 0.21f, 1});
+    centered(c, 790, games[anim_idx].name, 44, white, 1500);
+    centered(c, 860, "Abrindo…", 28, muted, 900);
+    if (!record_mode)
+        text(c, 78, 1031, "○  Cancelar", 24, muted, 300);
+}
+#endif
 // Full-screen launch scene: the focused game's cover moves left while a disc slides out from behind it and spins.
 void draw_launch_anim(Canvas &c, std::uint64_t elapsed)
 {
+#ifdef ESTANTE_GL
+    draw_launch_anim_gl(c, elapsed);
+    return;
+#endif
     auto clamp01 = [](float v) { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; };
     auto ease_out = [](float v) { return 1.0f - (1.0f - v) * (1.0f - v) * (1.0f - v); };
     const float t = clamp01(static_cast<float>(elapsed) / static_cast<float>(anim_length));
