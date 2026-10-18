@@ -1,6 +1,9 @@
 // Estante native PS5 prototype. GPL-3.0-or-later.
 // VideoOut and Pad ABI based on the public boilerplate, not firmware offsets.
 #include "demo_renderer.hpp"
+#ifdef ESTANTE_GL
+#include "gl_main.hpp"
+#endif
 #include "library.hpp"
 #include "experience.hpp"
 #include "i18n.hpp"
@@ -22,7 +25,12 @@
 #include <unistd.h>
 #include <sys/stat.h>
 using namespace estante;
+#ifdef ESTANTE_GL
+using Canvas = estante::GlCanvas; // the screens draw through the GPU canvas
+estante::GlCanvas *gpu_canvas = nullptr;
+#else
 using ps5::demo::Canvas;
+#endif
 using ps5::demo::Color;
 struct PadSample
 {
@@ -924,6 +932,13 @@ void poll_work()
             dest.age = ++cover_clock;
             dest.tint = average_pixels(decoded_cover);
             build_thumb(dest.thumb, dest.pixels);
+#ifdef ESTANTE_GL
+            if (gpu_canvas)
+            {
+                gpu_canvas->invalidate(dest.pixels);
+                gpu_canvas->invalidate(dest.thumb);
+            }
+#endif
         }
         else if (failed_cover_count < max_games)
             std::snprintf(failed_covers[failed_cover_count++], 10, "%s", requested_cover);
@@ -2674,11 +2689,15 @@ void draw(Canvas &c) noexcept
         start_launch(idx);
     }
     // The renderer keeps the finished frame in a cached buffer, so an unchanged state needs no redraw.
+#ifdef ESTANTE_GL
+    gpu_canvas = &c; // every frame is drawn again: the GPU path has no cached frame to keep
+#else
     static std::uint64_t previous = 0;
     const auto signature = state_signature();
     if (signature == previous)
         return;
     previous = signature;
+#endif
     if (const Cover *tinted = focus_cover())
     {
         const Color top = mix_color(static_cast<Color>(tinted->tint), bg, 92);
@@ -2785,5 +2804,9 @@ int main()
         count = 0;
     rebuild();
     start_request(1, "/appdb");
+#ifdef ESTANTE_GL
+    estante::run_gl(draw);
+#else
     ps5::demo::run_frames(draw, "Estante: sua biblioteca pessoal");
+#endif
 }

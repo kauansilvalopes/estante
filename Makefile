@@ -10,7 +10,18 @@ SHELL := /bin/bash
 APP_DEFINITIONS ?=
 APP_INCLUDE_PATHS ?=
 APP_STATIC_ARCHIVES ?=
+APP_IMPORT_STUBS ?=
 APP_RUNTIME_MODULES ?=
+# Empty selects the pinned ps5-opengl release (tools/fetch-opengl-sdk.sh).
+PS5_OPENGL_PREFIX ?=
+
+# Estante always builds against ps5-opengl (the GPU renderer); user APP_* values append.
+OPENGL_SDK := .deps/ps5-opengl/current
+override APP_DEFINITIONS := $(strip GL_GLEXT_PROTOTYPES=1 ESTANTE_GL=1 $(APP_DEFINITIONS))
+override APP_INCLUDE_PATHS := $(strip src $(OPENGL_SDK)/include $(APP_INCLUDE_PATHS))
+override APP_STATIC_ARCHIVES := $(strip .deps/ps5-opengl/libps5opengl-group.a $(APP_STATIC_ARCHIVES))
+override APP_IMPORT_STUBS := $(strip $(OPENGL_SDK)/lib/libSceAgc.so \
+	$(OPENGL_SDK)/lib/libSceAgcDriver.so $(APP_IMPORT_STUBS))
 APP_WRAP_SYMBOLS ?=
 APP_SOURCE_DIR ?=
 APP_PARAM ?= estante-sce/param.json
@@ -43,7 +54,8 @@ BUILD_JOBS ?= $(shell nproc 2>/dev/null || echo 2)
 USE_CCACHE ?= 1
 export BUILD_JOBS USE_CCACHE
 export HOST_CC HOST_CXX HOST_TEST_CFLAGS HOST_TEST_CXXFLAGS HOST_TEST_LDFLAGS
-export APP_DEFINITIONS APP_INCLUDE_PATHS APP_STATIC_ARCHIVES APP_RUNTIME_MODULES APP_WRAP_SYMBOLS
+export APP_DEFINITIONS APP_INCLUDE_PATHS APP_STATIC_ARCHIVES APP_IMPORT_STUBS APP_RUNTIME_MODULES APP_WRAP_SYMBOLS
+export PS5_OPENGL_PREFIX
 export APP_SOURCE_DIR APP_PARAM APP_SCE_SYS APP_ASSETS APP_ROOT_FILES
 export APP_LAPY_HELPER
 export PACBREW_PACKAGES PACBREW_INCLUDE_PATHS PACBREW_STATIC_ARCHIVES
@@ -56,7 +68,7 @@ RUNTIME_INPUTS := tools/rebuild-libc.sh tools/build-host-tools.sh tools/ninja-bu
 	$(wildcard tooling/native/runtime/*.txt)
 HOST_UNIT_TEST := build/tests/demo_renderer_tests
 
-.PHONY: all app build init doctor test test-deps test-unit test-integration libc deps pacbrew pacbrew-list assets-check format format-check tidy lint check sandbox-elevation-example update-check-example test-update-check self-update-helper self-update-example test-self-update deploy undeploy clean distclean help
+.PHONY: all app build opengl init doctor test test-deps test-unit test-integration libc deps pacbrew pacbrew-list assets-check format format-check tidy lint check sandbox-elevation-example update-check-example test-update-check self-update-helper self-update-example test-self-update deploy undeploy clean distclean help
 
 all: app
 build: app
@@ -138,7 +150,11 @@ $(RUNTIME): $(RUNTIME_INPUTS)
 	@printf '%s\n' '==> [libc] Generating the missing or outdated runtime'
 	@bash tools/rebuild-libc.sh
 
-app: $(RUNTIME)
+opengl:
+	@printf '%s\n' '==> [opengl] Preparing the ps5-opengl SDK link group'
+	@bash tools/prepare-opengl.sh
+
+app: $(RUNTIME) opengl
 	@printf '%s\n' '==> [app] Compiling, linking, signing, and assembling the app folder'
 	@bash tools/build.sh Folder
 

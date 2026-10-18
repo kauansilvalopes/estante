@@ -134,3 +134,14 @@ https://github.com/google/fonts/tree/main/ofl/notosans . Source font SHA-256:
 `bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d`.
 Regenerate with `python3 tools/build-font-atlas.py` and Pillow 12.1.1.
 The committed atlas lets the normal native build run without Pillow.
+
+## GPU renderer (feat/gpu-ui)
+
+- **ps5-homebrew-ui** by BlackBearReloaded (GPL-3.0-or-later), https://github.com/blackbearreloaded/ps5-homebrew-ui:
+  `src/gfx`, `src/core`, `src/platform/ps5` (display, system), `src/ui` (fonts, glyphs, motion), `src/runtime`
+  (process heap and runtime shims) and `tools/font-baker`, copied unchanged unless a file says otherwise.
+- **ps5-opengl** SDK 1.0.2 by BlackBearReloaded (GPL-3.0-or-later and the licences in its `LICENSES` folder),
+  https://github.com/blackbearreloaded/ps5-opengl, fetched at build time by `tools/fetch-opengl-sdk.sh` (checksum pinned).
+  It builds on Mesa (MIT) and the PS5 payload SDK.
+- **stb_truetype** (public domain / MIT) in `third_party/stb`, used only by the font baker on the host.
+- **Noto Sans** (SIL OFL 1.1), `third_party/noto`, baked into `assets/fonts/noto.huifont`.

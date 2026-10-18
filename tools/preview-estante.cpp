@@ -4,6 +4,15 @@
 #define main estante_console_entry
 #include "../src/main.cpp"
 #undef main
+#ifdef ESTANTE_GL
+#include "core/save_file.hpp"
+#include "gfx/gl_program.hpp"
+#include "gfx/renderer.hpp"
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GL/glcorearb.h>
+#include <vector>
+#endif
 extern "C"
 {
     int sceUserServiceInitialize(const void *)
@@ -64,6 +73,104 @@ extern "C"
         return 0;
     }
 }
+
+#ifdef ESTANTE_GL
+// Renders the real draw callback through the kit's GL renderer on Mesa's surfaceless EGL (llvmpipe).
+struct GlHost
+{
+    hui::gfx::Renderer renderer;
+    hui::gfx::Font font;
+    hui::gfx::DrawList list;
+    estante::GlCanvas canvas;
+    std::uint32_t font_texture = 0;
+    GLuint fbo = 0, color = 0;
+
+    bool init()
+    {
+        auto get_display = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
+            eglGetProcAddress("eglGetPlatformDisplayEXT"));
+        EGLDisplay display = get_display ? get_display(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr)
+                                         : eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        EGLint major = 0, minor = 0;
+        if (display == EGL_NO_DISPLAY || !eglInitialize(display, &major, &minor) || !eglBindAPI(EGL_OPENGL_API))
+            return false;
+        const EGLint attributes[] = {EGL_CONTEXT_MAJOR_VERSION, 4, EGL_CONTEXT_MINOR_VERSION, 5,
+                                     EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT, EGL_NONE};
+        EGLContext context = eglCreateContext(display, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT, attributes);
+        if (context == EGL_NO_CONTEXT || !eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context))
+            return false;
+        hui::gfx::set_glsl_prefix("#version 450 core\n");
+        if (!renderer.init())
+            return false;
+        std::string bytes;
+        if (!hui::save::read_file("assets/fonts/noto.huifont", &bytes) || !font.load(bytes))
+            return false;
+        font_texture = renderer.batch().create_font_texture(font);
+        glGenTextures(1, &color);
+        glBindTexture(GL_TEXTURE_2D, color);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1920, 1080, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glGenFramebuffers(1, &fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
+        return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    }
+    void render()
+    {
+        canvas.begin(&list, &renderer.batch(), &font, font_texture);
+        draw(canvas);
+        renderer.begin();
+        renderer.draw(list);
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        renderer.present(fbo, 1920, 1080);
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    }
+    bool write_ppm(FILE *f)
+    {
+        std::vector<unsigned char> pixels(1920u * 1080u * 4u);
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glReadPixels(0, 0, 1920, 1080, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        for (int y = 1079; y >= 0; y--)
+            for (int x = 0; x < 1920; x++)
+                std::fwrite(&pixels[(static_cast<std::size_t>(y) * 1920 + x) * 4], 1, 3, f);
+        return true;
+    }
+};
+namespace estante
+{
+[[noreturn]] void run_gl(GlDrawScene) noexcept
+{
+    std::abort(); // the preview draws frames itself
+}
+} // namespace estante
+static GlHost *gl_host = nullptr;
+Canvas &preview_canvas(std::uint32_t *)
+{
+    if (!gl_host)
+    {
+        gl_host = new GlHost;
+        if (!gl_host->init())
+        {
+            std::fprintf(stderr, "no GL context or renderer (is Mesa EGL installed?)%s", "\n");
+            std::exit(4);
+        }
+    }
+    return gl_host->canvas;
+}
+void render_frame(Canvas &)
+{
+    gl_host->render();
+}
+#else
+Canvas &preview_canvas(std::uint32_t *frame)
+{
+    static Canvas canvas = Canvas::host_preview(frame);
+    return canvas;
+}
+void render_frame(Canvas &canvas)
+{
+    render_frame(canvas);
+}
+#endif
 int main(int argc, char **argv)
 {
     if (argc < 2 || argc > 3)
@@ -236,7 +343,7 @@ int main(int argc, char **argv)
                 std::strcmp(t, "English") && !(t[0] >= '0' && t[0] <= '9'))
                 std::printf("UNTRANSLATED: [%s]\n", t);
         };
-        auto canvas_i = Canvas::host_preview(frame);
+        auto &canvas_i = preview_canvas(frame);
         for (int s = 0; s < 4; s++)
         {
             screen = s;
@@ -246,13 +353,13 @@ int main(int argc, char **argv)
                 if (m == 1)
                 {
                     open_menu(0);
-                    draw(canvas_i);
+                    render_frame(canvas_i);
                     open_menu(1);
                 }
                 if (m == 5)
                     details_index = 0;
                 ui_version++;
-                draw(canvas_i);
+                render_frame(canvas_i);
             }
         }
         modal = 0;
@@ -262,7 +369,7 @@ int main(int argc, char **argv)
             query.view = v;
             rebuild();
             ui_version++;
-            draw(canvas_i);
+            render_frame(canvas_i);
         }
         std::printf("i18n walk done\n");
         return 0;
@@ -343,19 +450,19 @@ int main(int argc, char **argv)
         db = {};
         rebuild();
     }
-    auto canvas = Canvas::host_preview(frame);
+    auto &canvas = preview_canvas(frame);
     if (!std::strcmp(mode, "bench"))
     {
         // Host timing of full redraws per screen (relative numbers only; the console CPU differs).
         for (int target : {0, 1, 2, 3})
         {
             screen = target;
-            draw(canvas);
+            render_frame(canvas);
             const auto t0 = std::chrono::steady_clock::now();
             for (int i = 0; i < 30; i++)
             {
                 ui_version++;
-                draw(canvas);
+                render_frame(canvas);
             }
             const auto t1 = std::chrono::steady_clock::now();
             std::printf("screen %d: %.2f ms/frame\n", target,
@@ -365,24 +472,28 @@ int main(int argc, char **argv)
         anim_idx = 3;
         fake_process_time = 9000000;
         anim_start = fake_process_time - anim_length / 2;
-        draw(canvas);
+        render_frame(canvas);
         const auto a0 = std::chrono::steady_clock::now();
         for (int i = 0; i < 30; i++)
         {
             fake_process_time += 16000;
             anim_start = fake_process_time - anim_length / 2;
-            draw(canvas);
+            render_frame(canvas);
         }
         const auto a1 = std::chrono::steady_clock::now();
         std::printf("launch animation: %.2f ms/frame\n",
                     std::chrono::duration<double, std::milli>(a1 - a0).count() / 30.0);
         return 0;
     }
-    draw(canvas);
+    render_frame(canvas);
     FILE *f = std::fopen(argv[1], "wb");
     if (!f)
         return 3;
     std::fprintf(f, "P6\n1920 1080\n255\n");
+#ifdef ESTANTE_GL
+    gl_host->write_ppm(f);
+    return std::fclose(f);
+#endif
     for (unsigned y = 0; y < 1080; y++)
         for (unsigned x = 0; x < 1920; x++)
         {

@@ -141,7 +141,9 @@ pacbrew_includes=()
 pacbrew_archives=()
 [[ -z ${APP_DEFINITIONS:-} ]] || read -r -a definitions <<< "$APP_DEFINITIONS"
 [[ -z ${APP_INCLUDE_PATHS:-} ]] || read -r -a includes <<< "$APP_INCLUDE_PATHS"
+import_stubs=()
 [[ -z ${APP_STATIC_ARCHIVES:-} ]] || read -r -a archives <<< "$APP_STATIC_ARCHIVES"
+[[ -z ${APP_IMPORT_STUBS:-} ]] || read -r -a import_stubs <<< "$APP_IMPORT_STUBS"
 [[ -z ${PACBREW_PACKAGES:-} ]] || read -r -a pacbrew_packages <<< "$PACBREW_PACKAGES"
 [[ -z ${PACBREW_INCLUDE_PATHS:-} ]] || read -r -a pacbrew_includes <<< "$PACBREW_INCLUDE_PATHS"
 [[ -z ${PACBREW_STATIC_ARCHIVES:-} ]] || read -r -a pacbrew_archives <<< "$PACBREW_STATIC_ARCHIVES"
@@ -210,6 +212,8 @@ for source in "${sources[@]}"; do
         args+=("-I$root/$include")
     done
     args+=("${pacbrew_cflags[@]}")
+    # Vendored upstream code is built as published; its warnings are not ours to fix.
+    [[ $source != src/third_party/* ]] || args+=(-w)
     ninja_inputs=("$root/$source" "$root/tooling/prospero-clang18" "$target_compiler")
     ninja_edge CC "$object" env PS5_PAYLOAD_SDK="$sdk_root" \
         PS5_CLANG="$target_compiler" USE_CCACHE="${USE_CCACHE:-1}" \
@@ -239,8 +243,29 @@ done
 if (( ${#pacbrew_libs[@]} > 0 )); then
     link_inputs+=(--start-group "${pacbrew_libs[@]}" --end-group)
 fi
+# Extra import libraries (for example the OpenGL SDK's AGC stubs) are linked like
+# SDK stubs and handed to the converter so their imports resolve to modules.
+stub_paths=()
+stub_options=()
+for stub in "${import_stubs[@]}"; do
+    [[ $stub =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.so$ && -f $root/$stub ]] || {
+        echo "invalid import stub: $stub" >&2; exit 2;
+    }
+    stub_paths+=("$root/$stub")
+    stub_options+=(--stub "$root/$stub")
+done
+# The OpenGL runtime needs the process-lifetime heap in src/runtime/app_heap.c.
+if [[ -f $root/src/runtime/app_heap.c ]]; then
+    for symbol in malloc calloc realloc free posix_memalign malloc_usable_size; do
+        wrap_options+=("--wrap=$symbol")
+    done
+fi
+# The splash picture is hidden when the app says so (src/runtime/runtime_shims.c).
+if grep -qs '__wrap_sceSystemServiceHideSplashScreen' "$root/src/runtime/runtime_shims.c"; then
+    wrap_options+=("--wrap=sceSystemServiceHideSplashScreen")
+fi
 ninja_inputs=("$native/ps5-pie.ld" "$native/app-symbols.map" "$sdk_root/bin/prospero-lld")
-for input in "${link_inputs[@]}" "$sdk_root"/target/lib/*.so; do
+for input in "${link_inputs[@]}" "${stub_paths[@]}" "$sdk_root"/target/lib/*.so; do
     [[ $input == -* ]] || ninja_inputs+=("$input")
 done
 if [[ -n ${pacbrew_root:-} ]]; then
@@ -252,10 +277,10 @@ fi
 ninja_edge LINK "$build/llvm-pie.elf" "$sdk_root/bin/prospero-lld" -T "$native/ps5-pie.ld" --eh-frame-hdr \
     "${wrap_options[@]}" --version-script "$native/app-symbols.map" \
     -e _start -o "$build/llvm-pie.elf" "${link_inputs[@]}" \
-    --as-needed "$sdk_root"/target/lib/*.so
-ninja_inputs=("$build/llvm-pie.elf" "$tool" "$sdk_root"/target/lib/*.so)
+    --as-needed "${stub_paths[@]}" "$sdk_root"/target/lib/*.so
+ninja_inputs=("$build/llvm-pie.elf" "$tool" "${stub_paths[@]}" "$sdk_root"/target/lib/*.so)
 ninja_edge CONVERT "$build/eboot.elf" "$tool" link --in "$build/llvm-pie.elf" --out "$build/eboot.elf" \
-    --stub-dir "$sdk_root/target/lib" --module-sdk "$module_sdk" \
+    "${stub_options[@]}" --stub-dir "$sdk_root/target/lib" --module-sdk "$module_sdk" \
     --companion-sdk "$companion_sdk" --file-name eboot.elf
 ninja_run
 
