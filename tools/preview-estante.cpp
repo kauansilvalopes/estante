@@ -496,7 +496,7 @@ int main(int argc, char **argv)
                 !std::strncmp(t, "Platform: ", 10) || !std::strncmp(t, "Progress: ", 10) ||
                 !std::strncmp(t, "Favorites only: ", 16) || (t[0] && !t[1]) ||
                 !std::strcmp(t, "English") || !std::strcmp(t, "estante") ||
-                !std::strcmp(t, "0.5") || !t[0] || (t[0] >= '0' && t[0] <= '9') ||
+                !std::strcmp(t, "0.5.1") || !t[0] || (t[0] >= '0' && t[0] <= '9') ||
                 ((!std::strncmp(t, "PlayStation ", 12) || !std::strncmp(t, "Nintendo ", 9) ||
                   !std::strncmp(t, "GameCube", 8)) && std::strstr(t, "  ·  ")))
                 return; // brand, keyboard labels and already-formatted dynamic labels
@@ -540,6 +540,7 @@ int main(int argc, char **argv)
             ui_version++;
             render_frame(canvas_i);
         }
+        i18n::language = 1;
         for (const auto &t : preview_untranslated)
             std::printf("UNTRANSLATED: [%s]\n", t.c_str());
         std::printf("i18n walk done\n");
@@ -574,6 +575,14 @@ int main(int argc, char **argv)
     {
         home_row = 0;
         rails[0].cursor = 3;
+    }
+    if (!std::strncmp(mode, "es", 2))
+    {
+        i18n::language = 2; // Spanish layout
+        if (!std::strcmp(mode, "eslibrary"))
+            screen = 1;
+        if (!std::strcmp(mode, "esmenu"))
+            open_menu(0);
     }
     if (!std::strncmp(mode, "pt", 2))
     {
@@ -703,7 +712,7 @@ int main(int argc, char **argv)
         screen = 2;
     if (!std::strcmp(mode, "settings"))
         screen = 3;
-    if (!std::strcmp(mode, "ptsettings"))
+    if (!std::strcmp(mode, "ptsettings") || !std::strcmp(mode, "essettings"))
         screen = 3;
     if (!std::strncmp(mode, "details", 7))
     {

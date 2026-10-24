@@ -9,7 +9,7 @@ struct Query
     int status = 0;
     bool favorites = false;
     bool descendants = false;
-    bool withApps = false; // Todos os jogos hides apps unless asked (Inicio keeps them)
+    bool withApps = false; // Todos os jogos hides apps unless asked (no screen asks today)
     int sort = 0;
     char text[80]{};
 };

@@ -418,18 +418,18 @@ void save_preferences()
                   "{\"largeText\":%s,\"recordMode\":%s,\"lang\":\"%s\",\"anim\":%s,\"theme\":%d,"
                   "\"home\":%d,\"tip\":%d}",
                   large_text ? "true" : "false", record_mode ? "true" : "false",
-                  i18n::language ? "en" : "pt", launch_anim_enabled ? "true" : "false",
+                  i18n::language == 2 ? "es" : i18n::language ? "en" : "pt", launch_anim_enabled ? "true" : "false",
                   theme_index, home_style, style_tip_seen ? 1 : 0);
     if (!write_file("/download0/estante-preferences.json", data))
         msg("Nao foi possivel salvar as preferencias.");
 }
-// PS5 system language: Brazilian Portuguese (17) and European Portuguese (7) get Portuguese,
-// everything else gets English. A saved preference overrides this.
+// PS5 system language: Brazilian Portuguese (17) and European Portuguese (7) get Portuguese, Spanish (3)
+// and Latin American Spanish (20) get Spanish, everything else gets English. A saved preference overrides this.
 void detect_language()
 {
     int value = 1;
     if (sceSystemServiceParamGetInt(1, &value) == 0)
-        i18n::language = (value == 17 || value == 7) ? 0 : 1;
+        i18n::language = (value == 17 || value == 7) ? 0 : (value == 3 || value == 20) ? 2 : 1;
 }
 void read_preferences()
 {
@@ -458,7 +458,7 @@ void read_preferences()
         style_tip_seen = tip->valuedouble == 1;
     auto *lang = cJSON_GetObjectItemCaseSensitive(root, "lang");
     if (cJSON_IsString(lang) && lang->valuestring)
-        i18n::language = std::strcmp(lang->valuestring, "pt") ? 1 : 0;
+        i18n::language = !std::strcmp(lang->valuestring, "pt") ? 0 : !std::strcmp(lang->valuestring, "es") ? 2 : 1;
     cJSON_Delete(root);
 }
 void clear_trophy_summaries()
@@ -580,8 +580,7 @@ void rebuild()
     char focused[10]{};
     if (home_count && home_cursor < home_count)
         std::snprintf(focused, 10, "%s", games[home_games[home_cursor]].id);
-    Query homeQuery;
-    homeQuery.withApps = true;
+    Query homeQuery; // games only: apps and emulators stay in Biblioteca > Apps
     home_count = select_games(db, games, count, homeQuery, home_games);
     auto recency = [](int i)
     {
@@ -2255,6 +2254,9 @@ enum Action
     HomeStyle,
     RestoreConfirm
 };
+// Ajustes, in the order shown: how it looks first, then how it behaves, then the library chores.
+constexpr Action settings_actions[settings_count] = {HomeStyle, ThemeNext, TextSize, Animation, Language,
+                                                     Record,    Refresh,   NewFolder, Export,    Restore};
 struct MenuItem
 {
     Action action;
@@ -2430,7 +2432,7 @@ void action(Action a)
         clear_search();
         break;
     case Language:
-        i18n::language = !i18n::language;
+        i18n::language = (i18n::language + 1) % i18n::language_count;
         ui_version++;
         save_preferences();
         break;
@@ -2957,10 +2959,9 @@ void input(std::uint32_t b)
             open_menu(1);
             return;
         }
-        if (b & TRIANGLE)
+        if (b & TRIANGLE) // search; organizing a game moved to Options and the game page
         {
-            if (filtered_count)
-                open_menu(0);
+            open_keyboard(1);
             return;
         }
         if ((b & CIRCLE) && library_zone)
@@ -3049,8 +3050,13 @@ void input(std::uint32_t b)
         }
         if ((b & DOWN) && cursor / lib_cols < (filtered_count - 1) / lib_cols)
             cursor = std::min(cursor + lib_cols, filtered_count - 1);
-        if (b & SQUARE)
-            selected[filtered[cursor]] = !selected[filtered[cursor]];
+        if (b & SQUARE) // choosing games for a collection, otherwise the organize menu for this game
+        {
+            if (editing_collection >= 0)
+                selected[filtered[cursor]] = !selected[filtered[cursor]];
+            else
+                open_menu(0);
+        }
         if (b & CROSS)
         {
             if (editing_collection >= 0)
@@ -3111,11 +3117,7 @@ void input(std::uint32_t b)
         if (b & CIRCLE)
             set_screen(0);
         if (b & CROSS)
-        {
-            Action actions[] = {TextSize,  Record,   Refresh,   Export,    Restore,
-                                NewFolder, Language, Animation, ThemeNext, HomeStyle};
-            action(actions[settings_cursor]);
-        }
+            action(settings_actions[settings_cursor]);
     }
 }
 
@@ -3281,7 +3283,7 @@ void breadcrumb(char *out, std::size_t cap, int slot)
 void draw_top(Canvas &c)
 {
     text(c, 100, 30, "estante", 40, white, 260);
-    text(c, 285, 44, "0.5", 22, muted, 90);
+    text(c, 285, 44, "0.5.1", 22, muted, 90);
     const char *tabs[] = {"Início", "Biblioteca", "Coleções", "Ajustes"};
     unsigned widths[4], total = 0;
     for (int i = 0; i < 4; i++)
@@ -3715,8 +3717,10 @@ void draw_shelf_home(Canvas &c)
     }
     else
     {
-        text(c, 78, 324, "Sua biblioteca está vazia", 44, white, 1450);
-        text(c, 80, 400, "Atualize os jogos em Biblioteca > Options.", 28, muted, 1450);
+        text(c, 78, 324, count ? "Nenhum jogo no Início" : "Sua biblioteca está vazia", 44, white, 1450);
+        text(c, 80, 400,
+             count ? "Seus apps ficam em Biblioteca > Apps." : "Atualize os jogos em Biblioteca > Options.", 28,
+             muted, 1450);
     }
 }
 // ---- Catalogue-style screens: Inicio (hero + rows), Biblioteca (portrait grid) and the game page ----
@@ -3971,8 +3975,10 @@ void draw_discover(Canvas &c)
 {
     if (!rail_count)
     {
-        text(c, 100, 300, "Sua biblioteca está vazia", 64, white, 1500);
-        text(c, 102, 400, "Atualize os jogos em Biblioteca > Options.", 28, muted, 1500);
+        text(c, 100, 300, count ? "Nenhum jogo no Início" : "Sua biblioteca está vazia", 64, white, 1500);
+        text(c, 102, 400,
+             count ? "Seus apps ficam em Biblioteca > Apps." : "Atualize os jogos em Biblioteca > Options.", 28,
+             muted, 1500);
         return;
     }
     const int idx = home_game();
@@ -4162,20 +4168,20 @@ void draw_settings(Canvas &c)
     text(c, 72, 150, "Do seu jeito", 64, white, 1250);
     text(c, 76, 238, "Preferências e cuidado com a sua biblioteca.", 28, muted, 1300);
     const char *names[] = {
-        "Texto maior",          "Modo gravação",           "Atualizar biblioteca",
-        "Exportar organização", "Restaurar último backup", "Criar coleção",
-        "Idioma / Language",    "Animação ao abrir",       "Tema",
-        "Estilo do Início"};
-    const char *desc[] = {"Aumenta os textos menores da interface.",
+        "Estilo do Início",     "Tema",                    "Texto maior",
+        "Animação ao abrir",    "Idioma / Language",       "Modo gravação",
+        "Atualizar biblioteca", "Criar coleção",           "Exportar organização",
+        "Restaurar último backup"};
+    const char *desc[] = {"Catálogo com fileiras ou a estante com capas em 3D. L2 + R2 no Início também troca.",
+                          "Troca as cores da interface.",
+                          "Aumenta os textos menores da interface.",
+                          "Mostra a capa e um disco girando antes de abrir o jogo.",
+                          "Alterna entre português, inglês e espanhol.",
                           "Esconde dicas e mensagens para capturas.",
                           "Consulta os jogos pelo Elf Arsenal local.",
-                          "Salva uma cópia independente no armazenamento do app.",
-                          "Recupera a organização anterior. Os jogos não são alterados.",
                           "Comece uma seleção pessoal de jogos.",
-                          "Alterna entre português e inglês.",
-                          "Mostra a capa e um disco girando antes de abrir o jogo.",
-                          "Troca as cores da interface.",
-                          "Catálogo com fileiras ou a estante com capas em 3D. L2 + R2 no Início também troca."};
+                          "Salva uma cópia independente no armazenamento do app.",
+                          "Recupera a organização anterior. Os jogos não são alterados."};
     for (int i = 0; i < settings_count; i++)
     {
         unsigned y = 282 + i * 70;
@@ -4184,18 +4190,30 @@ void draw_settings(Canvas &c)
         if (focus)
             c.rectangle(70, y + 9, 4, 44, accent);
         text(c, 96, y + 5, names[i], 32, white, 650);
-        text(c, 710, y + 17, desc[i], 24, muted, 1050);
-        if (i < 2)
-            text(c, 570, y + 14, (i == 0 ? large_text : record_mode) ? "Ligado" : "Desligado", 24,
-                 accent, 130);
-        if (i == 6)
-            text(c, 570, y + 14, i18n::language ? "English" : "Português", 24, accent, 130);
-        if (i == 7)
-            text(c, 570, y + 14, launch_anim_enabled ? "Ligado" : "Desligado", 24, accent, 130);
-        if (i == 8)
-            text(c, 570, y + 14, themes[theme_index].name, 24, accent, 130);
-        if (i == 9)
-            text(c, 570, y + 14, home_style ? "Estante" : "Catálogo", 24, accent, 130);
+        text(c, 770, y + 17, desc[i], 24, muted, 1050);
+        switch (settings_actions[i])
+        {
+        case TextSize:
+            text(c, 570, y + 14, large_text ? "Ligado" : "Desligado", 24, accent, 190);
+            break;
+        case Record:
+            text(c, 570, y + 14, record_mode ? "Ligado" : "Desligado", 24, accent, 190);
+            break;
+        case Language:
+            text(c, 570, y + 14, i18n::language == 2 ? "Español" : i18n::language ? "English" : "Português", 24, accent, 190);
+            break;
+        case Animation:
+            text(c, 570, y + 14, launch_anim_enabled ? "Ligado" : "Desligado", 24, accent, 190);
+            break;
+        case ThemeNext:
+            text(c, 570, y + 14, themes[theme_index].name, 24, accent, 190);
+            break;
+        case HomeStyle:
+            text(c, 570, y + 14, home_style ? "Estante" : "Catálogo", 24, accent, 190);
+            break;
+        default:
+            break;
+        }
     }
 }
 // The game page: a full-screen product page, not a dialog. The wide art fills the screen under a black
@@ -4912,11 +4930,17 @@ void draw(Canvas &c) noexcept
             text(c, 100, 1031, "L1 / R1  Abas", 24, muted, 250);
             text(c, 380, 1031, editing_collection >= 0 ? "×  Selecionar" : "×  Abrir", 24, white,
                  250);
-            text(c, 640, 1031, "△  Organizar", 24, muted, 250);
-            text(c, 920, 1031, "□  Selecionar", 24, muted, 250);
+            text(c, 640, 1031, "△  Buscar", 24, muted, 250);
+            text(c, 920, 1031, editing_collection >= 0 ? "□  Selecionar" : "□  Organizar", 24, muted, 250);
             text(c, 1210, 1031, query.text[0] ? "○  Limpar busca" : "Touchpad  Filtros", 24, accent,
                  300);
             text(c, 1540, 1031, "Options  Opções", 24, muted, 300);
+        }
+        else if (screen == 3)
+        {
+            text(c, 100, 1031, "L1 / R1  Navegar", 24, muted, 250);
+            text(c, 380, 1031, "×  Alterar", 24, white, 250);
+            text(c, 640, 1031, "○  Voltar", 24, muted, 250);
         }
         else
         {
@@ -4938,6 +4962,8 @@ void draw(Canvas &c) noexcept
             if (screen == 0 && home_style == 1 && home_count)
                 hint(show_back ? "R2  Frente" : "R2  Verso", muted, 160);
 #endif
+            if (screen == 0)
+                hint("L2 + R2  Estilo", muted, 230);
             hint(screen == 0 ? "Options  Biblioteca" : "Options  Opções", muted, 300);
         }
         if (!storage_ok)
