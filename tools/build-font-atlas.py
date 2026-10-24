@@ -2,7 +2,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 import struct,hashlib,math
 root=Path(__file__).resolve().parent.parent
-source=root/'third_party/noto/NotoSans.ttf'
+source=root/'third_party/inter/Inter-Medium.ttf'
 entries=[];data=bytearray()
 for size in [24,28,32,44,64]:
  font=ImageFont.truetype(str(source),size)
@@ -22,5 +22,5 @@ for size in [24,28,32,44,64]:
   raw=mask.tobytes() if w*h else b'' 
   entries.append((code,size,len(data),l,t,w,h,size if code in [0x25b3,0x25cb,0x25a1,0xd7] else round(font.getlength(char))));data.extend(raw)
 result=struct.pack('<II',0x46545345,len(entries))+b''.join(struct.pack('<IIIiiIII',*e) for e in entries)+data
-out=root/'assets/fonts';out.mkdir(exist_ok=True);(out/'noto.atlas').write_bytes(result)
+out=root/'assets/fonts';out.mkdir(exist_ok=True);(out/'inter.atlas').write_bytes(result)
 print('Font atlas:',len(result),'bytes; source SHA256:',hashlib.sha256(source.read_bytes()).hexdigest())

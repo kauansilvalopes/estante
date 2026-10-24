@@ -14,9 +14,12 @@ inline constexpr Entry table[] = {
     {"Bem-vindo ao Estante", "Welcome to Estante"},
     {"Biblioteca local", "Local library"},
     {"Biblioteca atualizada", "Library updated"},
+    {"Limite de 1024 jogos: alguns não foram importados.",
+     "1024-game limit reached: some titles were not imported."},
     {"Usando biblioteca salva", "Using saved library"},
     {"Todos os jogos", "All games"},
     {"PlayStation 2 e PSP", "PlayStation 2 & PSP"},
+    {"Emuladores e PS2", "Emulators & PS2"},
     {"Favoritos", "Favorites"},
     {"Sem coleção", "No collection"},
     {"Ocultos", "Hidden"},
@@ -36,6 +39,7 @@ inline constexpr Entry table[] = {
     {"ORGANIZACAO SALVA NO PS5", "Organization saved on the PS5"},
     {"FALHA AO SALVAR; ORGANIZACAO ANTERIOR PRESERVADA", "Save failed; previous organization kept"},
     {"Nao foi possivel salvar as preferencias.", "Could not save preferences."},
+    {"Caminho longo demais para consultar.", "Path is too long to query."},
     {"Não foi possível iniciar a consulta.", "Could not start the request."},
     {"Atualizando a biblioteca…", "Updating the library…"},
     {"Finalize a seleção antes de atualizar a biblioteca.",
@@ -49,6 +53,7 @@ inline constexpr Entry table[] = {
      "Another game is open. Close it from the PS5 menu."},
     {"Esse jogo já está aberto no PS5.", "This game is already open on the PS5."},
     {"Abrindo o jogo…", "Opening the game…"},
+    {"Abrindo o emulador.", "Opening the emulator."},
     {"Pedido enviado. Aguardando confirmação do PS5…", "Request sent. Waiting for the PS5 to confirm…"},
     {"O pedido falhou. Sua biblioteca continua intacta.", "The request failed. Your library is untouched."},
     {"O PS5 confirmou a abertura do jogo.", "The PS5 confirmed the game is opening."},
@@ -208,6 +213,37 @@ inline constexpr Entry table[] = {
      "Invalid organization data. Writing blocked to protect your data."},
     {"Não foi possível guardar a organização anterior. Gravação bloqueada.",
      "Could not keep the previous organization. Writing blocked."},
+    {"Continuar jogando", "Continue playing"},
+    {"PlayStation 2", "PlayStation 2"},
+    {"PlayStation 1", "PlayStation 1"},
+    {"Nintendo", "Nintendo"},
+    {"PlayStation 4", "PlayStation 4"},
+    {"PlayStation 5", "PlayStation 5"},
+    {"Ver tudo", "See all"},
+    {"Jogar", "Play"},
+    {"Detalhes", "Details"},
+    {"Buscar jogos", "Search games"},
+    {"Última vez", "Last played"},
+    {"Status", "Status"},
+    {"Sem registro", "No record"},
+    {"Nenhuma", "None"},
+    {"Favoritar", "Add favorite"},
+    {"Favorito", "Favorite"},
+    {"Organizar", "Organize"},
+    {"Voltar", "Back"},
+    {"Troféus", "Trophies"},
+    {"Carregando troféus…", "Loading trophies…"},
+    {"%u / %u troféus", "%u / %u trophies"},
+    {"□  Favoritar", "□  Favorite"},
+    {"Estilo do Início", "Home style"},
+    {"Catálogo com fileiras ou a estante com capas em 3D. L2 + R2 no Início também troca.",
+     "Catalogue rows, or the shelf with 3D covers. L2 + R2 on the Home switches it too."},
+    {"Dica: L2 + R2 troca entre Catálogo e Estante.", "Tip: L2 + R2 switches between Catalogue and Shelf."},
+    {"Estilo Estante. L2 + R2 volta ao Catálogo.", "Shelf style. L2 + R2 goes back to Catalogue."},
+    {"Estilo Catálogo. L2 + R2 volta à Estante.", "Catalogue style. L2 + R2 goes back to Shelf."},
+    {"Catálogo", "Catalogue"},
+    {"R2  Detalhes", "R2  Details"},
+    {"Estante", "Shelf"},
 };
 inline void (*on_miss)(const char *) = nullptr; // host preview only: report untranslated text
 inline const char *tr(const char *pt)
@@ -215,8 +251,14 @@ inline const char *tr(const char *pt)
     if (language == 0 || !pt)
         return pt;
     for (const auto &e : table)
+    {
         if (!std::strcmp(e.pt, pt))
             return e.en;
+        // Translation results are safe to pass through tr() again. This keeps helpers such as
+        // centered() idempotent and prevents the preview's miss hook from reporting English output.
+        if (!std::strcmp(e.en, pt))
+            return e.en;
+    }
     if (on_miss)
         on_miss(pt);
     return pt;

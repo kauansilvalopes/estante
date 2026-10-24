@@ -1,6 +1,8 @@
 // Render the real native draw callback on a host; no console launch is simulated.
 #include <cassert>
 #include <chrono>
+#include <set>
+#include <string>
 #define main estante_console_entry
 #include "../src/main.cpp"
 #undef main
@@ -13,6 +15,7 @@
 #include <GL/glcorearb.h>
 #include <vector>
 #endif
+static std::set<std::string> preview_untranslated;
 extern "C"
 {
     int sceUserServiceInitialize(const void *)
@@ -103,7 +106,7 @@ struct GlHost
         if (!renderer.init())
             return false;
         std::string bytes;
-        if (!hui::save::read_file("assets/fonts/noto.huifont", &bytes) || !font.load(bytes))
+        if (!hui::save::read_file("assets/fonts/inter.huifont", &bytes) || !font.load(bytes))
             return false;
         font_texture = renderer.batch().create_font_texture(font);
         glGenTextures(1, &color);
@@ -168,7 +171,7 @@ Canvas &preview_canvas(std::uint32_t *frame)
 }
 void render_frame(Canvas &canvas)
 {
-    render_frame(canvas);
+    draw(canvas); // the CPU canvas draws into the preview's tiled frame buffer
 }
 #endif
 int main(int argc, char **argv)
@@ -179,11 +182,14 @@ int main(int argc, char **argv)
     const char *names[] = {"Horizon Explorer",  "Ōkami™ – Edição ★",    "The Last Journey",
                            "Stellar Adventure", "Shadow of the Valley", "Racing Legends",
                            "Mountain Quest",    "Little Planet"};
-    count = 8;
+    count = 20;
     for (int i = 0; i < count; i++)
     {
         std::snprintf(games[i].id, 10, "PPSA%05d", 1000 + i);
-        std::snprintf(games[i].name, 192, "%s", names[i]);
+        if (i < 8)
+            std::snprintf(games[i].name, 192, "%s", names[i]);
+        else
+            std::snprintf(games[i].name, 192, "%s %d", names[i % 8], i / 8 + 1);
         auto &art = covers[i];
         std::snprintf(art.id, 10, "%s", games[i].id);
         art.ready = true;
@@ -242,19 +248,39 @@ int main(int argc, char **argv)
     pad = 0;
     work.store(1);
     rebuild();
-    assert(screen == 0);
+    assert(screen == 0 && home_style == 0);
+    // rows: Continue (every game was started once), Want to play (status 1), the pinned collection
+    // and PS5
+    assert(rail_count == 4 && rails[0].kind == Rail::Continue && rails[0].count == 20 &&
+           rails[1].kind == Rail::Want && rails[1].count == 5 && rails[2].kind == Rail::Folder &&
+           rails[2].count == 7 && rails[3].kind == Rail::PS5 && rails[3].count == 20);
+    assert(home_game() == rails[0].items[0]);
     input(RIGHT);
-    assert(home_cursor == 1);
+    assert(rails[0].cursor == 1);
     input(LEFT);
-    assert(home_cursor == 0);
+    assert(rails[0].cursor == 0);
+    input(DOWN);
+    assert(home_row == 1);
+    input(RIGHT);
+    input(UP);
+    assert(home_row == 0 && rails[1].cursor == 1); // each row remembers its own card
+    input(UP);
+    assert(home_row == 0); // nothing above the first row
     input(R1);
     assert(screen == 1);
     input(RIGHT);
     assert(cursor == 1);
     input(DOWN);
-    assert(cursor == 7);
+    assert(cursor == 7); // six icons per row
     input(UP);
     assert(cursor == 1);
+    input(UP);
+    assert(library_zone == 1);
+    input(RIGHT);
+    assert(library_chip == 1);
+    input(LEFT);
+    input(DOWN);
+    assert(library_zone == 0);
     input(LEFT);
     assert(cursor == 0);
     input(LEFT);
@@ -282,6 +308,10 @@ int main(int argc, char **argv)
     selected[0] = true;
     assert(state_signature() != before);
     selected[0] = false;
+    before = state_signature();
+    details_button = 2;
+    assert(details_page || state_signature() != before);
+    details_button = 0;
     std::snprintf(entry_name, sizeof entry_name, "café");
     erase_character();
     assert(!std::strcmp(entry_name, "caf"));
@@ -294,26 +324,132 @@ int main(int argc, char **argv)
     std::snprintf(response, sizeof response,
                   "{\"gameRunning\":\"true\",\"runningTitleId\":\"PPSA12345\"}");
     assert(!parse_running(active, running));
+    {
+        // Trophy file: three trophies, grades platinum/gold/bronze; the gold one is earned and carries
+        // 0x20 extra bytes before its fields, as earned records do on the console.
+        std::memset(response, 0, 0x2000);
+        auto put32 = [](std::size_t at, std::uint32_t v)
+        {
+            for (int i = 0; i < 4; i++)
+                response[at + i] = static_cast<char>(v >> (24 - 8 * i));
+        };
+        const std::uint32_t grades[3] = {1, 2, 4};
+        for (int i = 0; i < 3; i++)
+        {
+            const std::size_t at = 0x300 + i * 0xe0, shift = i == 1 ? 0x20 : 0;
+            put32(at, 0x500);
+            put32(at + 4, 0xc0);
+            put32(at + 0x10 + shift, i);
+            put32(at + 0x14 + shift, grades[i]);
+            const std::size_t state = 0x1000 + i * 0x60;
+            put32(state, 0x800);
+            put32(state + 4, 0x50);
+            put32(state + 0x10, i);
+            put32(state + 0x14, i == 1 ? 0x11 : 0x10);
+            put32(state + 0x24, i == 1 ? 1700000000u : 0);
+        }
+        response_size = 0x2000;
+        TrophySummary parsed;
+        assert(parse_trophy_title(parsed));
+        assert(parsed.total == 3 && parsed.earned == 1 && parsed.total_by[1] == 1 &&
+               parsed.total_by[2] == 1 && parsed.total_by[4] == 1 && parsed.earned_by[2] == 1 &&
+               parsed.earned_by[1] == 0 && parsed.earned_by[4] == 0);
+    }
+    trophies[0].state = 2;
+    clear_trophy_summaries();
+    assert(trophies[0].state == 0);
     open_collection(0);
     assert(screen == 2 && collection_entries[0] == -1);
     input(CIRCLE);
     assert(collection_parent == -1);
     set_screen(0);
+    {
+        const bool previous_storage = storage_ok;
+        storage_ok = false; // don't persist preview input into the host's /download0.
+        home_style = 0;
+        details_page = false;
+        modal = 0;
+        editing_collection = -1;
+        held = L2;
+        input(L2);
+        assert(home_style == 0 && !details_page);
+        held = L2 | R2;
+        input(R2); // second trigger completes the chord; it must not open details.
+        assert(home_style == 1 && !details_page);
+        held = 0;
+        input(0);
+        modal = 1;
+        held = L2 | R2;
+        input(R2);
+        assert(home_style == 1);
+        modal = 0;
+        details_page = true;
+        input(R2);
+        assert(home_style == 1);
+        details_page = false;
+        screen = 1;
+        input(R2);
+        assert(home_style == 1);
+        screen = 0;
+        editing_collection = 0;
+        input(R2);
+        assert(home_style == 1);
+        editing_collection = -1;
+        home_style = 0;
+        held = 0;
+        message_until = 0;
+        storage_ok = previous_storage;
+    }
+    // X on a card plays it (the launch animation can be cancelled); R2 opens the game page
+    input(CROSS);
+    assert(anim_idx == rails[0].items[0] && !details_page);
+    input(CIRCLE);
+    assert(anim_idx < 0);
+    input(R2);
+    assert(details_page && details_index == rails[0].items[0] && details_button == 0);
+    input(RIGHT);
+    assert(details_button == 1);
+    input(RIGHT);
+    input(RIGHT);
+    assert(details_button == 2);
+    input(LEFT);
+    input(LEFT);
     input(CROSS);
     assert(anim_idx >= 0 && !launch_pending); // the launch animation runs first
     input(CIRCLE);
     assert(anim_idx < 0 && !launch_pending); // Circle cancels it
     launch_anim_enabled = false;
     input(CROSS);
-    assert(launch_pending && pending_kind == 4 && modal == 0);
+    assert(launch_pending && pending_kind == 4 && modal == 0 && !std::strcmp(launch_game, games[details_index].id));
     launch_anim_enabled = true;
     launch_pending = false;
     pending_kind = 0;
     message_until = 0;
+    input(SQUARE); // favourite from the game page (saving needs the console's /download0)
+    assert(details_page);
+    input(TRIANGLE); // the organize menu opens over the page
+    assert(modal == 1 && details_page);
+    input(CIRCLE);
+    assert(modal == 0 && details_page);
+    input(CIRCLE);
+    assert(!details_page);
+    // PS2: the picked image, not PS5SX2, becomes the "continue" entry
+    std::snprintf(games[count].id, 10, "PS2ABCDEF");
+    std::snprintf(games[count].name, 192, "Image");
+    std::snprintf(ps2_file[count], sizeof ps2_file[0], "Image.iso");
+    count++;
+    rebuild();
+    start_launch(count - 1);
+    assert(!std::strcmp(launch_game, "PS2ABCDEF") && !std::strcmp(launch_id, "PPSA99203"));
+    launch_pending = false;
+    pending_kind = 0;
+    count--;
+    rebuild();
     input(SQUARE);
     assert(screen == 1 && modal == 3);
     input(CIRCLE);
     set_screen(0);
+    home_style = 1; // the earlier shelf keeps working
     home_cursor = 5;
     rebuild();
     assert(home_cursor == 5);
@@ -334,9 +470,15 @@ int main(int argc, char **argv)
     rebuild();
     assert(home_games[0] == 3 && home_games[1] == 1 && home_games[2] == 6);
     home_cursor = 0;
+    home_style = 0;
+    rebuild();
+    screen = 0;
+    message_until = 0;
+    message[0] = 0;
     if (!std::strcmp(argc == 3 ? argv[2] : "", "i18n"))
     {
         // Walk every screen and modal in English and report text that has no translation.
+        preview_untranslated.clear();
         i18n::on_miss = [](const char *t)
         {
             for (int i = 0; i < count; i++)
@@ -345,9 +487,17 @@ int main(int argc, char **argv)
             for (int i = 0; i < 32; i++)
                 if (db.folders[i].used && !std::strcmp(t, db.folders[i].name))
                     return;
-            if (t[0] && !std::strstr(t, "PPSA") && std::strcmp(t, "estante") && std::strcmp(t, "0.4") &&
-                std::strcmp(t, "English") && !(t[0] >= '0' && t[0] <= '9'))
-                std::printf("UNTRANSLATED: [%s]\n", t);
+            if (!std::strcmp(t, "@kndofc") || !std::strcmp(t, "Idioma / Language") ||
+                !std::strcmp(t, "PlayStation") || !std::strcmp(t, "Apps") ||
+                !std::strcmp(t, "OK") || !std::strcmp(t, "<") ||
+                !std::strncmp(t, "Platform: ", 10) || !std::strncmp(t, "Progress: ", 10) ||
+                !std::strncmp(t, "Favorites only: ", 16) || (t[0] && !t[1]) ||
+                !std::strcmp(t, "English") || !std::strcmp(t, "estante") ||
+                !std::strcmp(t, "0.5") || !t[0] || (t[0] >= '0' && t[0] <= '9') ||
+                ((!std::strncmp(t, "PlayStation ", 12) || !std::strncmp(t, "Nintendo ", 9) ||
+                  !std::strncmp(t, "GameCube", 8)) && std::strstr(t, "  ·  ")))
+                return; // brand, keyboard labels and already-formatted dynamic labels
+            preview_untranslated.emplace(t);
         };
         auto &canvas_i = preview_canvas(frame);
         for (int s = 0; s < 4; s++)
@@ -368,7 +518,17 @@ int main(int argc, char **argv)
                 render_frame(canvas_i);
             }
         }
+        details_index = 0;
+        details_page = true;
+        ui_version++;
+        render_frame(canvas_i);
+        details_page = false;
         modal = 0;
+        screen = 0;
+        home_style = 1;
+        ui_version++;
+        render_frame(canvas_i);
+        home_style = 0;
         for (int v = 0; v < 12; v++)
         {
             screen = 1;
@@ -377,16 +537,70 @@ int main(int argc, char **argv)
             ui_version++;
             render_frame(canvas_i);
         }
+        for (const auto &t : preview_untranslated)
+            std::printf("UNTRANSLATED: [%s]\n", t.c_str());
         std::printf("i18n walk done\n");
         return 0;
     }
     const char *mode = argc == 3 ? argv[2] : "home";
+#ifdef ESTANTE_GL
+    // Synthetic wide art (layout review only: it says nothing about real pictures).
+    auto fake_wide = [](int idx)
+    {
+        std::snprintf(wide_art_id, sizeof wide_art_id, "%s", games[idx].id);
+        std::snprintf(wide_have, sizeof wide_have, "%s", games[idx].id);
+        wide_art_state = 2;
+        for (unsigned y = 0; y < wide_h; y++)
+            for (unsigned x = 0; x < wide_w; x++)
+            {
+                const int dx = static_cast<int>(x) - 640, dy = static_cast<int>(y) - 250;
+                const bool glow = dx * dx + dy * dy < 150 * 150;
+                const unsigned r = glow ? 255 : 60 + y / 5 + (idx * 37) % 60,
+                               g = glow ? 230 : 70 + x / 12 + (idx * 53) % 50,
+                               b = glow ? 180 : 120 + y / 6;
+                wide_art[y * wide_w + x] = 0xff000000u | ((b & 255) << 16) | ((g & 255) << 8) | (r & 255);
+            }
+    };
+    if (!std::strcmp(mode, "home") || !std::strcmp(mode, "homemid") ||
+        !std::strcmp(mode, "details") || !std::strcmp(mode, "detailstroph"))
+        fake_wide(0);
     if (!std::strcmp(mode, "homemid"))
-        home_cursor = 3;
-    if (!std::strcmp(mode, "library"))
+        fake_wide(3);
+#endif
+    if (!std::strcmp(mode, "homemid"))
+    {
+        home_row = 0;
+        rails[0].cursor = 3;
+    }
+    if (!std::strncmp(mode, "pt", 2))
+    {
+        i18n::language = 0; // Portuguese layout: longer words
+        if (!std::strcmp(mode, "ptdetails"))
+        {
+            details_index = 0;
+            details_page = true;
+            trophies[0].state = 1;
+        }
+        if (!std::strcmp(mode, "ptlibrary"))
+            screen = 1;
+    }
+    if (!std::strcmp(mode, "homewant"))
+    {
+        home_row = 1;
+        rails[1].cursor = 2;
+    }
+    if (!std::strcmp(mode, "shelf"))
+        home_style = 1;
+    if (!std::strcmp(mode, "library") || !std::strcmp(mode, "libraryscroll") || !std::strcmp(mode, "libchips"))
     {
         screen = 1;
         selected[2] = true;
+        cursor = 3;
+        if (!std::strcmp(mode, "libraryscroll"))
+            cursor = 18;
+        if (!std::strcmp(mode, "libchips"))
+            library_zone = 1;
+        library_chip = 2;
     }
     if (!std::strcmp(mode, "apps"))
     {
@@ -406,9 +620,9 @@ int main(int argc, char **argv)
                       "{\"name\":\"Toy Story 3 (BR).iso\",\"dir\":false},{\"name\":\"notes.txt\",\"dir\":false},"
                       "{\"name\":\"Jackie Chan Adventures (PT).iso.partial\",\"dir\":false},"
                       "{\"name\":\"Wall-E (BR).iso\",\"dir\":false}]}");
-        assert(count == 11 && is_ps2_id(games[8].id) && !std::strcmp(ps2_file[9], "Toy Story 3 (BR).iso"));
+        assert(count == 23 && is_ps2_id(games[20].id) && !std::strcmp(ps2_file[21], "Toy Story 3 (BR).iso"));
         add_ps2_games("{\"entries\":[{\"name\":\"UP (BR).iso\",\"dir\":false}]}"); // rescan replaces
-        assert(count == 9 && !std::strcmp(games[8].name, "UP (BR)") && platform(games[8], db) == 2);
+        assert(count == 21 && !std::strcmp(games[20].name, "UP (BR)") && platform(games[20], db) == 2);
         add_ps2_games("{\"entries\":[{\"name\":\"Shadow of the Colossus (BR) (Dub-e-Leg).iso\",\"dir\":false},"
                       "{\"name\":\"Toy Story 3 (BR).iso\",\"dir\":false},{\"name\":\"Wall-E (BR).iso\",\"dir\":false}]}");
         rebuild();
@@ -428,6 +642,7 @@ int main(int argc, char **argv)
     if (!std::strcmp(mode, "flip"))
     {
         // Renders a frame, then moves the cursor and renders again 90 ms later: the carousel is mid-slide.
+        home_style = 1;
         home_cursor = 3;
         fake_process_time = 5000000;
         render_frame(preview_canvas(frame));
@@ -438,6 +653,7 @@ int main(int argc, char **argv)
     if (!std::strncmp(mode, "turn", 4))
     {
         // turnN: the right stick held to the right for N frames of 100 ms.
+        home_style = 1;
         home_cursor = 3;
         fake_process_time = 5000000;
         render_frame(preview_canvas(frame));
@@ -451,17 +667,18 @@ int main(int argc, char **argv)
     if (!std::strncmp(mode, "back", 4))
     {
         // backN: the case has been turning toward its back for N tenths of a second.
+        home_style = 1;
         home_cursor = 3;
         fake_process_time = 5000000;
         render_frame(preview_canvas(frame));
         show_back = true;
         if (std::strcmp(mode, "back0") != 0 && std::strcmp(mode, "backnoart") != 0)
         {
-            std::snprintf(back_art_id, 10, "%s", games[home_games[home_cursor]].id);
-            back_art_state = 2;
+            std::snprintf(wide_art_id, 10, "%s", games[home_games[home_cursor]].id);
+            wide_art_state = 2;
             for (unsigned y = 0; y < wide_h; y++)
                 for (unsigned x = 0; x < wide_w; x++)
-                    back_art[y * wide_w + x] = 0xff000000u | ((60 + y / 2) << 16) | ((90 + x / 4) << 8) | (150 - y / 3);
+                    wide_art[y * wide_w + x] = 0xff000000u | ((60 + y / 2) << 16) | ((90 + x / 4) << 8) | (150 - y / 3);
         }
         for (int step = 0; step < std::atoi(mode + 4); step++)
         {
@@ -479,16 +696,51 @@ int main(int argc, char **argv)
     }
     if (!std::strcmp(mode, "collections"))
         screen = 2;
+    if (!std::strcmp(mode, "ptcollections"))
+        screen = 2;
     if (!std::strcmp(mode, "settings"))
         screen = 3;
-    if (!std::strcmp(mode, "details"))
+    if (!std::strcmp(mode, "ptsettings"))
+        screen = 3;
+    if (!std::strncmp(mode, "details", 7))
     {
         details_index = 0;
-        modal = 5;
+        details_page = true;
+        details_button = !std::strcmp(mode, "detailstroph") ? 1 : 0;
+        activity_now = 1800000000ull;
+        played_last[0] = activity_now - 3 * 86400;
+        played_seconds[0] = 80000;
+        metadata(db, games[0].id)->folders = 3;
+        if (!std::strcmp(mode, "detailstroph"))
+        {
+            trophies[0].state = 2;
+            const unsigned short total_by[5] = {0, 1, 3, 9, 27}, earned_by[5] = {0, 0, 1, 4, 9};
+            for (int g = 1; g <= 4; g++)
+            {
+                trophies[0].total_by[g] = total_by[g];
+                trophies[0].earned_by[g] = earned_by[g];
+                trophies[0].total += total_by[g];
+                trophies[0].earned += earned_by[g];
+            }
+            metadata(db, games[0].id)->favorite = true;
+        }
     }
+    if (!std::strcmp(mode, "detailsnowide"))
+    {
+        details_index = 2;
+        details_page = true;
+    }
+#ifdef ESTANTE_GL
+    if (!std::strcmp(mode, "homenowide"))
+        wide_art_state = 0;
+#endif
     if (!std::strcmp(mode, "menu"))
         open_menu(0);
+    if (!std::strcmp(mode, "ptmenu"))
+        open_menu(0);
     if (!std::strcmp(mode, "search"))
+        open_keyboard(1);
+    if (!std::strcmp(mode, "ptsearch"))
         open_keyboard(1);
     if (!std::strcmp(mode, "large"))
     {

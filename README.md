@@ -3,7 +3,7 @@
 Organizador de biblioteca que roda no proprio PS5, com navegacao pelo controle.
 *A native PS5 library organizer with controller navigation, for jailbroken consoles.*
 
-**English:** Estante ("shelf" in Portuguese) runs on the console itself: a Home screen with recently played games, a Library with large covers, filters, search and sort, your own collections, favorites and hidden titles, left stick and touchpad support. The language (English or Portuguese) follows your PS5 system language. It needs ShadowMountPlus and Elf Arsenal (the app reads the game list and covers from its local API) and was only tested on firmware 11.60. The interface is drawn on the console's GPU (OpenGL through the [ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) SDK and the renderer of [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui)): real 3D game cases in perspective (cover flow with floor reflections, a glint that follows the tilt, a spine with the game name), turned by hand with the right stick or flipped with R2/L2 to a back with your own data (play time, last played, status, collections) and a wide picture of the game, a launch animation where the case opens and the disc rolls out with the game's art on its label, and four color themes. Portrait covers come from the PC tool `tools/ps5_covers_sync.py`; without them the app uses the square icon. Prototype: expect bugs. Downloads and install notes: [latest release](https://github.com/kauansilvalopes/estante/releases/tag/v0.4.0).
+**English:** Estante ("shelf" in Portuguese) is a controller-driven PS5 library organizer with a Home catalogue, a cover-flow shelf, a searchable and filterable Library, game details, trophies when the console has local trophy data, and personal collections. It reads PS5/PS4 titles through Elf Arsenal and can import games from the standard `/data` folders of PS5SX2, SwanStationPS5, Porpoise, and PS5-ECAM. For imported emulator titles, Play opens the emulator; select the game inside it. USB/M.2 game folders and Switch titles are not imported; 3DS/DS lists depend on ECAM having scanned them. Each emulator must have been opened at least once. It requires Elf Arsenal and ShadowMountPlus; only firmware 11.60 has been tested. The GPU interface uses OpenGL via [ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) and [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui), with 3D cases, cover flow, a launch animation, five color themes, and English/Portuguese localization. Portrait covers can be added with `tools/ps5_covers_sync.py`; otherwise the app uses available square art. Downloads and install notes: [latest release](https://github.com/kauansilvalopes/estante/releases/tag/v0.5.0).
 
 ## Screenshots
 
@@ -23,9 +23,7 @@ Rendered by the real draw code through the GPU renderer on a PC (Mesa) with plac
 | **Launch: the case opens, the disc comes out** | |
 | ![Launch](docs/screenshots/launch.png) | |
 
-**Versão 0.3 em desenvolvimento.** Nova experiência nativa com quatro áreas:
-Início, Biblioteca, Coleções e Ajustes. A versão 0.3 iniciou no PS5 do autor (FW 11.60), abriu o controle e carregou o catálogo.
-A fluidez, persistência após reabertura e lançamento de jogos ainda precisam de validação de uso.
+O Estante organiza a biblioteca dentro do próprio aplicativo, sem mover jogos nem alterar o menu oficial. Lê jogos de PS5/PS4 pelo Elf Arsenal e importa títulos das pastas padrão em `/data` de PS5SX2 (PS2), SwanStationPS5 (PS1), Porpoise (GameCube/Wii) e PS5-ECAM (Wii U/3DS/DS). Ao selecionar um título importado de emulador, o Estante abre o emulador; a seleção do jogo é feita dentro dele. Não lê bibliotecas em USB/M.2 nem jogos de Switch; os títulos de 3DS/DS aparecem depois que o ECAM os escaneia. Abra cada emulador ao menos uma vez antes de atualizar o Estante. Requer Elf Arsenal e ShadowMountPlus; o teste de console disponível foi feito no firmware 11.60.
 
 ## Nova experiência
 
@@ -34,7 +32,7 @@ A fluidez, persistência após reabertura e lançamento de jogos ainda precisam 
 - Coleções e subcoleções, seleção múltipla, favoritos, ocultos e classificação PS2/PS4/PS5.
 - Coleções automáticas por plataforma, progresso manual e favoritos. Crie em Todos os jogos, sem busca textual ativa.
 - Progresso manual: Quero jogar, Em andamento e Concluído. Não representa troféus ou leitura de saves.
-- Fonte Noto Sans com minúsculas e acentos; opção de texto maior e modo gravação persistentes.
+- Fonte Inter com minúsculas e acentos; opção de texto maior e modo gravação persistentes.
 - Capas locais PNG/JPEG, carregadas em segundo plano, com cache limitado. Nenhuma capa de jogo acompanha o projeto.
 - Consulta ao estado do console antes de abrir um título e tentativa de confirmação posterior.
 - Migração dos metadados v1 com cópia anterior preservada; exportação e restauração local.

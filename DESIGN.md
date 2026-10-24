@@ -1,26 +1,23 @@
-# UX 0.3 — 2026-10-17
+# UX atual — catálogo, detalhes e estante
 
-A página inicial ajuda a escolher o próximo jogo; a Biblioteca concentra a consulta completa.
-A referência de navegação é o fluxo de [Steam Big Picture](https://store.steampowered.com/bigpicture):
-entrada pelo controle, foco explícito e acesso rápido à biblioteca. Não são copiados assets da Steam.
+Início, Biblioteca e Detalhes são contextos diferentes. O Início destaca um jogo com arte larga,
+plataforma, dados locais e ações, seguido por fileiras de jogos e coleções. A Biblioteca reúne a
+grade completa, busca, filtros e ordenação; Detalhes é uma página inteira. A estante 3D segue
+disponível como estilo alternativo do Início. As referências de navegação são o fluxo do
+[Orbit Store](https://github.com/saawant12/orbit-store-ps5) e o Steam Big Picture. Não são copiados
+código, arte ou marcas.
 
-O Início mostra escolhas feitas pelo próprio Estante e itens fixados. Sem histórico, usa
-fixados, Quero jogar ou catálogo, identificado como descoberta. Coleções têm mosaicos
-e hierarquia própria. A Biblioteca tem busca, filtros, seleção múltipla e ordenação.
+O tema padrão usa fundo preto, texto branco e azul (#0070D1) para foco e progresso. A fonte Inter
+está licenciada pela SIL Open Font License 1.1. Há cinco temas. Só são mostrados dados que o Estante
+possui: ele não inventa sinopse, classificação ou tamanho. “Continuar jogando” considera somente
+lançamentos iniciados pelo Estante. A arte larga carrega em segundo plano; sem ela, o app usa a capa
+quadrada e um degradê de cor.
 
-A navegação usa quatro áreas estáveis por L1/R1; ações de jogos ficam nos detalhes ou
-no menu contextual. Ocultar e remover de coleção não apagam jogos. Exclusão de coleção
-e restauração de organização exigem confirmação. Preferências visuais são persistidas.
-
-Tipografia com acentos, contraste alto, foco com contorno e opção de texto maior.
-Capas ausentes recebem placeholder; a interface não depende de um serviço externo de arte.
-Sem animação contínua nesta versão: primeiro validar o custo do renderizador por CPU.
-
-Previews usam títulos e imagens fictícias. A aprovação visual não comprova o desempenho
-ou o lançamento no PS5. A versão 0.3 permanece de desenvolvimento até validação física.
+A interface principal é renderizada na GPU via OpenGL. As prévias no PC usam títulos e imagens
+fictícias; validam layout e renderização, mas não comprovam desempenho, instalação, leitura dos
+emuladores nem lançamento no PS5. A única validação de firmware informada pelo autor é a 11.60.
 
 ---
-
 ## Referência histórica da versão anterior
 
 # Estante: biblioteca para TV

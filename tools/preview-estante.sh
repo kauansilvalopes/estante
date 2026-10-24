@@ -5,7 +5,7 @@ mkdir -p build/tests .local
 clang-18 -O2 -c src/cover_decode.c -o build/tests/cover-host.o
 clang-18 -O2 -c src/cJSON.c -o build/tests/cjson-preview.o
 clang++-18 -std=c++20 -O1 -g -fsanitize=address,undefined -DESTANTE_HOST_PREVIEW -ffunction-sections -fdata-sections tools/preview-estante.cpp src/demo_renderer.cpp src/library.cpp src/experience.cpp build/tests/cover-host.o build/tests/cjson-preview.o -Wl,--gc-sections -pthread -o build/tests/preview-estante
-for mode in home homemid library apps sidebar collections settings details menu search large rec empty i18n ps2 anim0 anim3 anim6 anim10; do
+for mode in home homemid shelf library libchips apps sidebar collections settings details detailsnowide menu search large rec empty i18n ps2 anim0 anim3 anim6 anim10; do
  build/tests/preview-estante ".local/preview-$mode.ppm" "$mode"
 done
 python3 - <<'PY'

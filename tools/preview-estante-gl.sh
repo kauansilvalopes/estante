@@ -11,7 +11,7 @@ clang++-18 -std=c++20 -O1 -g -DESTANTE_HOST_PREVIEW -DESTANTE_GL=1 -DGL_GLEXT_PR
   tools/preview-estante.cpp tools/gl_host_platform.cpp src/gl_canvas.cpp src/gl3d.cpp src/gfx/*.cpp src/core/save_file.cpp \
   src/library.cpp src/experience.cpp build/tests/cover-host.o build/tests/cjson-preview.o \
   -Wl,--gc-sections -pthread -l:libEGL.so.1 -l:libGL.so.1 -lm -o build/tests/preview-estante-gl
-modes=${*:-home homemid library apps sidebar collections settings details menu search large rec empty ps2 anim0 anim3 anim6 anim10}
+modes=${*:-home homemid homewant homenowide library libraryscroll libchips details detailstroph detailsnowide shelf apps sidebar collections settings menu search large rec empty ps2 anim0 anim6 anim10 flip turn4 back6}
 for mode in $modes; do
   build/tests/preview-estante-gl ".local/gl-$mode.ppm" "$mode"
 done

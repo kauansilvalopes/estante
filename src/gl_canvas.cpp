@@ -19,7 +19,10 @@ hui::gfx::Color to_gfx(ps5::demo::Color color) noexcept
 
 namespace
 {
-constexpr std::size_t max_cached_textures = 96;
+// One entry per pixel buffer: every cover slot owns three (picture, thumbnail, tall picture), so 32 slots already
+// fill 96. When the table is full the oldest texture is deleted at once, and a card drawn earlier in the same
+// frame that still points at it shows another game's cover; leave room for the wide art, icons and case faces.
+constexpr std::size_t max_cached_textures = 256;
 
 Rect rect_of(unsigned x, unsigned y, unsigned w, unsigned h) noexcept
 {

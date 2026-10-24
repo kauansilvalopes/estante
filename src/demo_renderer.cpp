@@ -384,9 +384,9 @@ void load_font()
         return;
     font_tried = true;
 #ifdef ESTANTE_HOST_PREVIEW
-    const char *path = "assets/fonts/noto.atlas";
+    const char *path = "assets/fonts/inter.atlas";
 #else
-    const char *path = "/app0/assets/fonts/noto.atlas";
+    const char *path = "/app0/assets/fonts/inter.atlas";
 #endif
     FILE *f = std::fopen(path, "rb");
     if (!f)

@@ -15,7 +15,7 @@ namespace estante
 {
 namespace
 {
-constexpr const char *font_path = "/app0/assets/fonts/noto.huifont";
+constexpr const char *font_path = "/app0/assets/fonts/inter.huifont";
 const char *failure_reason = "";
 
 // Last resort when the GPU path cannot start: a still message drawn on the CPU, so the player sees why

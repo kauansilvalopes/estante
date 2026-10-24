@@ -3,6 +3,10 @@
 #include <algorithm>
 namespace estante
 {
+static bool id_starts(const char *id, const char *prefix)
+{
+    return !std::strncmp(id, prefix, std::strlen(prefix));
+}
 static void normalize(const char *s, char *out, unsigned capacity)
 {
     unsigned n = 0;
@@ -49,7 +53,8 @@ static bool direct_member(const Library &d, const Game &g, int slot)
     const auto &f = d.folders[slot];
     const Meta *m = metadata(d, g.id);
     if (f.smart)
-        return (!f.rulePlatform || platform(g, d) == f.rulePlatform) &&
+        return (!f.rulePlatform ||
+                (f.rulePlatform == 2 ? id_starts(g.id, "PS2") : platform(g, d) == f.rulePlatform)) &&
                (!f.ruleStatus || (m && m->status == f.ruleStatus)) &&
                (!f.ruleFavorite || (m && m->favorite));
     return m && (m->folders & (std::uint32_t(1) << slot));
@@ -86,14 +91,18 @@ int select_games(const Library &d, const Game *games, int count, const Query &q,
         if ((q.view == 7) != hidden)
             continue;
         int p = platform(g, d);
-        bool match = (q.view == 0 && (q.withApps || p != 1)) || q.view == 7 || (q.view == 1 && p == 2) ||
+        const bool nintendo = id_starts(g.id, "WII") || id_starts(g.id, "WIU") ||
+                              id_starts(g.id, "3DS") || id_starts(g.id, "NDS");
+        bool match = (q.view == 0 && (q.withApps || p != 1)) || q.view == 7 ||
+                     (q.view == 1 && id_starts(g.id, "PS2")) || (q.view == 12 && id_starts(g.id, "PS1")) ||
+                     (q.view == 13 && nintendo) ||
                      (q.view == 2 && p == 4) || (q.view == 3 && p == 5) ||
                      (q.view == 4 && p == 1) || (q.view == 5 && m && m->favorite) ||
                      (q.view == 6 && (!m || !m->folders)) || (q.view == 8 && m && m->status == 1) ||
                      (q.view == 9 && m && m->status == 2) ||
                      (q.view == 10 && m && m->status == 3) || (q.view == 11 && m && m->pinned) ||
                      (q.view >= 100 && collection_contains(d, g, q.view - 100, q.descendants));
-        if (match && (!q.platform || p == q.platform) &&
+        if (match && (!q.platform || (q.platform == 2 ? id_starts(g.id, "PS2") : p == q.platform)) &&
             (!q.status || (m && m->status == q.status)) && (!q.favorites || (m && m->favorite)) &&
             name_matches(g.name, q.text))
             out[n++] = i;
@@ -140,6 +149,73 @@ int recent_games(const Library &d, const Game *games, int count, int *out, int c
     {
         const Meta *m = metadata(d, games[all[i]].id);
         if (m && m->lastChosen)
+            out[got++] = all[i];
+    }
+    return got;
+}
+int rail_games(const Library &d, const Game *games, int count, Rail kind, int folder, int *out,
+               int capacity)
+{
+    if (capacity <= 0)
+        return 0;
+    if (kind == Rail::Continue)
+        return recent_games(d, games, count, out, capacity);
+    Query q;
+    switch (kind)
+    {
+    case Rail::Favorites:
+        q.view = 5;
+        break;
+    case Rail::Want:
+        q.view = 8;
+        break;
+    case Rail::Folder:
+        if (folder < 0 || folder >= max_folders || !d.folders[folder].used)
+            return 0;
+        q.view = 100 + folder;
+        q.sort = d.folders[folder].sort;
+        q.descendants = true;
+        break;
+    case Rail::PS5:
+        q.view = 3;
+        break;
+    case Rail::PS4:
+        q.view = 2;
+        break;
+    case Rail::PS2:
+        q.view = 1;
+        break;
+    case Rail::PS1:
+        q.view = 12;
+        break;
+    case Rail::Wii:
+    case Rail::WiiU:
+    case Rail::N3DS:
+    case Rail::NDS:
+        q.view = 13; // every Nintendo system; the id prefix below picks one
+        break;
+    case Rail::Continue:
+        break;
+    }
+    int all[max_games];
+    const int n = select_games(d, games, count, q, all);
+    const char *prefix = nullptr;
+    if (kind == Rail::PS1)
+        prefix = "PS1";
+    else if (kind == Rail::Wii)
+        prefix = "WII";
+    else if (kind == Rail::WiiU)
+        prefix = "WIU";
+    else if (kind == Rail::N3DS)
+        prefix = "3DS";
+    else if (kind == Rail::NDS)
+        prefix = "NDS";
+    int got = 0;
+    for (int i = 0; i < n && got < capacity; i++)
+    {
+        const char *id = games[all[i]].id;
+        const bool match = kind == Rail::PS2 ? id_starts(id, "PS2") : !prefix || id_starts(id, prefix);
+        if (match)
             out[got++] = all[i];
     }
     return got;

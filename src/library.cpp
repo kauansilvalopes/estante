@@ -104,7 +104,8 @@ static bool starts_with(const char *id, const char *prefix)
 static int default_platform(const char *id)
 {
     // "PS2" + 6 hex digits: made up by the app for PS2 images, which have no title id.
-    if (starts_with(id, "PS2"))
+    if (starts_with(id, "PS2") || starts_with(id, "PS1") || starts_with(id, "WII") ||
+        starts_with(id, "WIU") || starts_with(id, "3DS") || starts_with(id, "NDS"))
         return 2;
     const bool ps5 = starts_with(id, "PPSA"), ps4 = starts_with(id, "CUSA");
     if (ps5 || ps4)

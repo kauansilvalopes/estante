@@ -4,6 +4,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_PNG
+#define STBI_ONLY_TGA
+#define STBI_MAX_DIMENSIONS 2048
 #define STBI_NO_STDIO
 #define STBI_NO_HDR
 #define STBI_NO_LINEAR
@@ -14,7 +16,7 @@
 #include "cover_decode.h"
 int decode_cover(const unsigned char* bytes,size_t length,uint32_t* pixels,unsigned edge) {
  int w=0,h=0,channels=0;
- if(!bytes||!pixels||length==0||length>1024*1024||edge==0||edge>512)return 0;
+ if(!bytes||!pixels||length==0||length>4u*1024u*1024u||edge==0||edge>512)return 0;
  if(!stbi_info_from_memory(bytes,(int)length,&w,&h,&channels)||w<=0||h<=0||w>2048||h>2048)return 0;
  unsigned char* rgba=stbi_load_from_memory(bytes,(int)length,&w,&h,&channels,4);
  if(!rgba)return 0;
@@ -37,7 +39,7 @@ int decode_cover(const unsigned char* bytes,size_t length,uint32_t* pixels,unsig
 // the portrait cases of the GPU cover flow.
 int decode_cover_rect(const unsigned char* bytes,size_t length,uint32_t* pixels,unsigned dw,unsigned dh) {
  int w=0,h=0,channels=0;
- if(!bytes||!pixels||length==0||length>1024*1024||dw==0||dh==0||dw>1024||dh>1024)return 0;
+ if(!bytes||!pixels||length==0||length>4u*1024u*1024u||dw==0||dh==0||dw>1024||dh>1024)return 0;
  if(!stbi_info_from_memory(bytes,(int)length,&w,&h,&channels)||w<=0||h<=0||w>2048||h>2048)return 0;
  unsigned char* rgba=stbi_load_from_memory(bytes,(int)length,&w,&h,&channels,4);
  if(!rgba)return 0;
