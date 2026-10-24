@@ -248,6 +248,9 @@ int main(int argc, char **argv)
     pad = 0;
     work.store(1);
     rebuild();
+    assert(home_style == 1); // a new install starts on the shelf
+    home_style = 0;          // this part of the preview walks the catalogue rows
+    rebuild();
     assert(screen == 0 && home_style == 0);
     // rows: Continue (every game was started once), Want to play (status 1), the pinned collection
     // and PS5

@@ -238,7 +238,7 @@ inline constexpr Entry table[] = {
     {"Estilo do Início", "Home style"},
     {"Catálogo com fileiras ou a estante com capas em 3D. L2 + R2 no Início também troca.",
      "Catalogue rows, or the shelf with 3D covers. L2 + R2 on the Home switches it too."},
-    {"Dica: L2 + R2 troca entre Catálogo e Estante.", "Tip: L2 + R2 switches between Catalogue and Shelf."},
+    {"Dica: L2 + R2 troca entre Estante e Catálogo.", "Tip: L2 + R2 switches between Shelf and Catalogue."},
     {"Estilo Estante. L2 + R2 volta ao Catálogo.", "Shelf style. L2 + R2 goes back to Catalogue."},
     {"Estilo Catálogo. L2 + R2 volta à Estante.", "Catalogue style. L2 + R2 goes back to Shelf."},
     {"Catálogo", "Catalogue"},

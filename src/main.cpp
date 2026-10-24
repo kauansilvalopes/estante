@@ -160,7 +160,7 @@ struct HomeRail
 };
 HomeRail rails[max_rails]{};
 int rail_count = 0;
-int home_style = 0;      // 0 catalogue, 1 shelf (cover flow)
+int home_style = 1;      // 0 catalogue, 1 shelf (cover flow); a new install starts on the shelf
 bool style_tip_seen = false; // the one-time "L2 + R2 changes the style" tip was shown
 int library_zone = 0;    // 0 grid, 1 the chips above it
 int library_chip = 0;    // 0 search, 1 view, 2 sort, 3 filters
@@ -1824,7 +1824,7 @@ void poll_work()
             // Once, when the first scan ends: the style switch is easy to miss in Ajustes.
             style_tip_seen = true;
             save_preferences();
-            msg("Dica: L2 + R2 troca entre Catálogo e Estante.");
+            msg("Dica: L2 + R2 troca entre Estante e Catálogo.");
         }
     }
     else if (work_kind == 10)

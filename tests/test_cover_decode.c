@@ -22,6 +22,14 @@ int main(int argc,char** argv){
  assert(!decode_cover(png,sizeof png,pixels,513));assert(!decode_cover(png,sizeof png,NULL,256));
  size_t big_size=0;unsigned char *big=large_png(&big_size);assert(big_size>1024*1024);assert(decode_cover(big,big_size,pixels,256));assert(decode_cover_rect(big,big_size,pixels,256,256));free(big);
  assert(decode_cover(tga,sizeof tga,pixels,256));
+ {
+  // A wide red picture (2x1) leaves bars above and below: they must take the picture's colour, not flat black.
+  static const unsigned char wide[]={0,0,2,0,0,0,0,0,0,0,0,0,2,0,1,0,32,0x28,0,0,255,255,0,0,255,255};
+  assert(decode_cover(wide,sizeof wide,pixels,256));
+  const uint32_t bar=pixels[5*256+128],mid=pixels[128*256+128];
+  assert((bar&255)>(bar>>8&255)+10&&(bar&255)>(bar>>16&255)+10); /* reddish, not grey */
+  assert(bar!=0xff201a16u&&mid==0xff0000ffu);                      /* the picture itself is untouched */
+ }
  if(argc>1){FILE* f=fopen(argv[1],"rb");assert(f);fseek(f,0,SEEK_END);long n=ftell(f);rewind(f);assert(n>0);unsigned char* bytes=malloc((size_t)n);assert(bytes);assert(fread(bytes,1,(size_t)n,f)==(size_t)n);fclose(f);assert(decode_cover(bytes,(size_t)n,pixels,256));free(bytes);}
  if(argc>2){FILE* f=fopen(argv[2],"rb");assert(f);fseek(f,0,SEEK_END);long n=ftell(f);rewind(f);assert(n>0);unsigned char* bytes=malloc((size_t)n);assert(bytes);assert(fread(bytes,1,(size_t)n,f)==(size_t)n);fclose(f);assert(decode_cover(bytes,(size_t)n,pixels,256));free(bytes);}
  puts("PASS: PNG channels, resize, corrupt and large input; optional real PNG/TGA artwork.");return 0;

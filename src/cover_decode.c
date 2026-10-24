@@ -14,6 +14,41 @@
 #define STBI_MAX_DIMENSIONS 2048
 #include "../third_party/stb/stb_image.h"
 #include "cover_decode.h"
+ // Bars around a letterboxed picture: instead of flat black, fill the square with the picture itself stretched
+// to cover it, reduced to a 24x24 grid, stretched back with bilinear filtering (a cheap blur) and darkened, so a
+// portrait box art sits on a soft version of its own colours.
+static void fill_backdrop(uint32_t* pixels,unsigned edge,const unsigned char* rgba,int w,int h){
+ enum{G=24,S=4};
+ float grid[G][G][3];
+ const float scale=((float)edge/(float)w>(float)edge/(float)h)?(float)edge/(float)w:(float)edge/(float)h;
+ const float ox=((float)edge-(float)w*scale)/2.0f,oy=((float)edge-(float)h*scale)/2.0f;
+ for(int gy=0;gy<G;gy++)for(int gx=0;gx<G;gx++){
+  float r=0,g=0,b=0;
+  for(int sy=0;sy<S;sy++)for(int sx=0;sx<S;sx++){
+   float dx=((float)gx+((float)sx+0.5f)/(float)S)*(float)edge/(float)G,dy=((float)gy+((float)sy+0.5f)/(float)S)*(float)edge/(float)G;
+   int x=(int)((dx-ox)/scale),y=(int)((dy-oy)/scale);
+   if(x<0)x=0;if(x>=w)x=w-1;if(y<0)y=0;if(y>=h)y=h-1;
+   const unsigned char* p=rgba+((size_t)y*(size_t)w+(size_t)x)*4;
+   float a=(float)p[3]/255.0f;
+   r+=(float)p[0]*a+22.0f*(1.0f-a);g+=(float)p[1]*a+26.0f*(1.0f-a);b+=(float)p[2]*a+32.0f*(1.0f-a);
+  }
+  grid[gy][gx][0]=r/(S*S);grid[gy][gx][1]=g/(S*S);grid[gy][gx][2]=b/(S*S);
+ }
+ for(unsigned y=0;y<edge;y++){
+  float fy=((float)y+0.5f)*(float)G/(float)edge-0.5f;if(fy<0)fy=0;if(fy>G-1)fy=G-1;
+  int y0=(int)fy;int y1=y0+1<G?y0+1:y0;float ty=fy-(float)y0;
+  for(unsigned x=0;x<edge;x++){
+   float fx=((float)x+0.5f)*(float)G/(float)edge-0.5f;if(fx<0)fx=0;if(fx>G-1)fx=G-1;
+   int x0=(int)fx;int x1=x0+1<G?x0+1:x0;float tx=fx-(float)x0;
+   float c[3];
+   for(int k=0;k<3;k++){
+    float top=grid[y0][x0][k]*(1.0f-tx)+grid[y0][x1][k]*tx,bot=grid[y1][x0][k]*(1.0f-tx)+grid[y1][x1][k]*tx;
+    c[k]=(top*(1.0f-ty)+bot*ty)*0.5f;
+   }
+   pixels[y*edge+x]=0xff000000u|((unsigned)c[2]<<16)|((unsigned)c[1]<<8)|(unsigned)c[0];
+  }
+ }
+}
 int decode_cover(const unsigned char* bytes,size_t length,uint32_t* pixels,unsigned edge) {
  int w=0,h=0,channels=0;
  if(!bytes||!pixels||length==0||length>4u*1024u*1024u||edge==0||edge>512)return 0;
@@ -24,7 +59,8 @@ int decode_cover(const unsigned char* bytes,size_t length,uint32_t* pixels,unsig
  unsigned dw=edge,dh=edge;
  if(w>h)dh=(unsigned)((uint64_t)edge*h/w);else dw=(unsigned)((uint64_t)edge*w/h);
  if(!dw)dw=1;if(!dh)dh=1;
- for(unsigned i=0;i<edge*edge;i++)pixels[i]=0xff201a16;
+ if(dw<edge||dh<edge)fill_backdrop(pixels,edge,rgba,w,h);
+ else for(unsigned i=0;i<edge*edge;i++)pixels[i]=0xff201a16;
  unsigned ox=(edge-dw)/2,oy=(edge-dh)/2;
  for(unsigned y=0;y<dh;y++)for(unsigned x=0;x<dw;x++){
   unsigned sx=(unsigned)((uint64_t)x*w/dw),sy=(unsigned)((uint64_t)y*h/dh);
