@@ -206,6 +206,7 @@ char requested_tall_path[768]{};
 // for normal titles. The id is made up ("PS2" + hash) because an image has no title id.
 char ps2_file[max_games][144]{};
 constexpr const char *ps2_games_dir = "/data/PCSX2/games";
+constexpr const char *ps2_listed_serials = "/data/PCSX2/chd-serials.txt";
 // Entries imported from another emulator library. They have a stable synthetic id so they can use
 // Estante's normal metadata, while `emulator_app` identifies the frontend to open.
 char emulator_app[max_games][10]{};
@@ -1224,6 +1225,72 @@ void finish_ps2_job(const char *serial)
         save_ps2_cache();
     }
 }
+// PS5SX2 writes /data/PCSX2/chd-serials.txt, one line per image: "<path>\t<size>\t<mtime>\t<serial>". Images the
+// disc reader cannot open (CHD, CSO, ZSO) get their serial, and so their cover, from that file. A serial read from
+// an ISO is never replaced. Returns true when something changed.
+bool apply_ps2_listed_serials(char *text)
+{
+    bool changed = false;
+    char *line = text;
+    while (line && *line)
+    {
+        char *end = std::strchr(line, '\n');
+        if (end)
+            *end = 0;
+        char *field[4]{};
+        int n = 0;
+        for (char *q = line; n < 4; n++)
+        {
+            field[n] = q;
+            char *tab = std::strchr(q, '\t');
+            if (!tab)
+            {
+                n++;
+                break;
+            }
+            *tab = 0;
+            q = tab + 1;
+        }
+        if (n == 4)
+        {
+            char *serial = field[3];
+            std::size_t length = std::strlen(serial);
+            while (length && (serial[length - 1] == '\r' || serial[length - 1] == ' '))
+                serial[--length] = 0;
+            bool shape = length == 10 && serial[4] == '-';
+            for (int k = 0; shape && k < 10; k++)
+                if (k != 4 && !(k < 4 ? std::isupper(static_cast<unsigned char>(serial[k]))
+                                      : std::isdigit(static_cast<unsigned char>(serial[k]))))
+                    shape = false;
+            const char *base = std::strrchr(field[0], '/');
+            base = base ? base + 1 : field[0];
+            for (int i = 0; shape && i < count; i++)
+            {
+                if (!ps2_file[i][0] || ps2_state[i] == 1 || std::strcmp(ps2_file[i], base))
+                    continue;
+                std::snprintf(ps2_serial[i], sizeof ps2_serial[0], "%s", serial);
+                ps2_state[i] = 1;
+                int c = 0;
+                while (c < ps2_cache_count && std::strcmp(ps2_cache_name[c], base))
+                    c++;
+                if (c < ps2_cache_count || ps2_cache_count < ps2_cache_max)
+                {
+                    if (c == ps2_cache_count)
+                    {
+                        std::snprintf(ps2_cache_name[c], sizeof ps2_cache_name[0], "%s", base);
+                        ps2_cache_count++;
+                    }
+                    std::snprintf(ps2_cache_serial[c], sizeof ps2_cache_serial[0], "%s", serial);
+                }
+                changed = true;
+            }
+        }
+        line = end ? end + 1 : nullptr;
+    }
+    if (changed)
+        save_ps2_cache();
+    return changed;
+}
 // Adds the PS2 images listed by Elf Arsenal (/api/fs/list) after the catalog.
 // Everything the scan chain imports (PS2 images and the emulator libraries) sits after the catalog titles, and
 // the chain runs again whenever Inicio is opened after a while. Dropping the whole imported block before it is
@@ -1720,10 +1787,22 @@ void poll_work()
         {
             add_ps2_games(response);
             rebuild();
-            if (next_ps2_job(path, sizeof path))
-                next = 8;
+            next = 21; // serials PS5SX2 already knows, for the images the disc reader cannot open
+            std::snprintf(path, sizeof path, "/api/fs/download?path=%s", ps2_listed_serials);
         }
         if (!next)
+        {
+            next = 13;
+            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", swan_games_dir);
+        }
+    }
+    else if (work_kind == 21)
+    {
+        if (response_ok && apply_ps2_listed_serials(response))
+            cover_version++;
+        if (next_ps2_job(path, sizeof path))
+            next = 8;
+        else
         {
             next = 13;
             std::snprintf(path, sizeof path, "/api/fs/list?path=%s", swan_games_dir);
@@ -3283,7 +3362,7 @@ void breadcrumb(char *out, std::size_t cap, int slot)
 void draw_top(Canvas &c)
 {
     text(c, 100, 30, "estante", 40, white, 260);
-    text(c, 285, 44, "0.5.1", 22, muted, 90);
+    text(c, 285, 44, "0.5.2", 22, muted, 90);
     const char *tabs[] = {"Início", "Biblioteca", "Coleções", "Ajustes"};
     unsigned widths[4], total = 0;
     for (int i = 0; i < 4; i++)

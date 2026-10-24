@@ -23,6 +23,16 @@ int main(int argc,char** argv){
  size_t big_size=0;unsigned char *big=large_png(&big_size);assert(big_size>1024*1024);assert(decode_cover(big,big_size,pixels,256));assert(decode_cover_rect(big,big_size,pixels,256,256));free(big);
  assert(decode_cover(tga,sizeof tga,pixels,256));
  {
+  /* 4K box art is about 1530 x 2160: taller than 2048 but accepted; beyond 2400 a side is refused. */
+  size_t tall_size=18+4*2200;unsigned char *tall=calloc(tall_size,1);assert(tall);
+  tall[2]=2;tall[12]=1;tall[14]=2200&255;tall[15]=2200>>8;tall[16]=32;tall[17]=8;
+  for(size_t i=0;i<2200;i++){tall[18+4*i]=255;tall[18+4*i+3]=255;}
+  assert(decode_cover(tall,tall_size,pixels,256));assert(decode_cover_rect(tall,tall_size,pixels,128,128));
+  tall[14]=2500&255;tall[15]=2500>>8;tall_size=18+4*2500;tall=realloc(tall,tall_size);assert(tall);
+  assert(!decode_cover(tall,tall_size,pixels,256));assert(!decode_cover_rect(tall,tall_size,pixels,128,128));
+  free(tall);
+ }
+ {
   // A wide red picture (2x1) leaves bars above and below: they must take the picture's colour, not flat black.
   static const unsigned char wide[]={0,0,2,0,0,0,0,0,0,0,0,0,2,0,1,0,32,0x28,0,0,255,255,0,0,255,255};
   assert(decode_cover(wide,sizeof wide,pixels,256));
