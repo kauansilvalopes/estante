@@ -198,6 +198,7 @@ int work_kind = 0, pending_kind = 0;
 char pending_path[768]{};
 bool response_ok = false;
 char requested_cover[10]{}, launch_id[10]{};
+char requested_fallback[96]{}; // a second place to ask for the same cover when the first has none
 char launch_game[10]{}; // the game the player picked (launch_id is PS5SX2 for a PS2 image)
 #ifdef ESTANTE_GL
 char requested_tall_path[768]{};
@@ -245,7 +246,7 @@ std::uint32_t decoded_cover[cover_edge * cover_edge]{};
 std::uint32_t decoded_tall[tall_w * tall_h]{};
 bool tall_ok = false;
 // One wide picture: the hero behind the focused game, the game page and the back of a case.
-constexpr int wide_w = 960, wide_h = 540;
+constexpr int wide_w = 1920, wide_h = 1080; // the console's 4K key art, halved
 std::uint32_t wide_art[wide_w * wide_h]{}, decoded_wide[wide_w * wide_h]{};
 char wide_art_id[10]{}, wide_have[10]{}; // wide_have: whose picture the buffer holds
 int wide_art_state = 0; // 0 nothing yet, 1 loading, 2 ready, 3 none for this game
@@ -718,7 +719,8 @@ bool cached_cover(const char *path, bool header)
     return !too_large && decode_cover(reinterpret_cast<unsigned char *>(response), response_size,
                                       decoded_cover, cover_edge);
 }
-bool http_get(const char *path, std::size_t prefix = 0)
+bool http_get_to(const char *path, char *response, std::size_t capacity, std::size_t &response_size,
+                 std::size_t prefix = 0)
 {
     response[0] = 0;
     response_size = 0;
@@ -756,9 +758,9 @@ bool http_get(const char *path, std::size_t prefix = 0)
     }
     std::size_t used = 0;
     bool eof = false;
-    while (used < sizeof(response) - 1)
+    while (used < capacity - 1)
     {
-        int n = sceNetRecv(s, response + used, sizeof(response) - 1 - used, 0);
+        int n = sceNetRecv(s, response + used, capacity - 1 - used, 0);
         if (n == 0)
         {
             eof = true;
@@ -799,6 +801,10 @@ bool http_get(const char *path, std::size_t prefix = 0)
     response[response_size] = 0;
     return true;
 }
+bool http_get(const char *path, std::size_t prefix = 0)
+{
+    return http_get_to(path, response, sizeof response, response_size, prefix);
+}
 
 void *worker(void *)
 {
@@ -809,13 +815,19 @@ void *worker(void *)
             hash = (hash ^ static_cast<unsigned char>(*p)) * 16777619u;
         char local[160], cache[160];
         std::snprintf(local, sizeof local, "/download0/artwork/%s.png", requested_cover);
-        std::snprintf(cache, sizeof cache, "/download0/estante-cover-%02u.bin", hash % 32);
+        std::snprintf(cache, sizeof cache, "/download0/estante-cover-hd-%02u.bin", hash % 32);
         cover_ok = cached_cover(local, false) || cached_cover(cache, true);
         if (!cover_ok)
         {
             response_ok = http_get(request_path);
             cover_ok = response_ok && decode_cover(reinterpret_cast<unsigned char *>(response),
                                                    response_size, decoded_cover, cover_edge);
+            if (!cover_ok && requested_fallback[0])
+            {
+                response_ok = http_get(requested_fallback);
+                cover_ok = response_ok && decode_cover(reinterpret_cast<unsigned char *>(response),
+                                                       response_size, decoded_cover, cover_edge);
+            }
             if (cover_ok)
             {
                 char tmp[180];
@@ -846,9 +858,18 @@ void *worker(void *)
 #ifdef ESTANTE_GL
     else if (work_kind == 9)
     {
-        response_ok = http_get(request_path);
-        wide_ok = response_ok && decode_cover_rect(reinterpret_cast<unsigned char *>(response),
-                                                   response_size, decoded_wide, wide_w, wide_h);
+        // The game's 4K key art is a PNG of up to 16 MB: it is read into a buffer of its own, not the 4 MB one.
+        constexpr std::size_t big_capacity = 24u * 1024u * 1024u;
+        wide_ok = false;
+        if (char *big = static_cast<char *>(std::malloc(big_capacity)))
+        {
+            std::size_t got = 0;
+            wide_ok = http_get_to(request_path, big, big_capacity, got) &&
+                      decode_cover_rect_large(reinterpret_cast<unsigned char *>(big), got, decoded_wide, wide_w,
+                                              wide_h) != 0;
+            std::free(big);
+        }
+        response_ok = wide_ok;
     }
 #endif
     else
@@ -3362,7 +3383,7 @@ void breadcrumb(char *out, std::size_t cap, int slot)
 void draw_top(Canvas &c)
 {
     text(c, 100, 30, "estante", 40, white, 260);
-    text(c, 285, 44, "0.5.2", 22, muted, 90);
+    text(c, 285, 44, "0.5.3", 22, muted, 90);
     const char *tabs[] = {"Início", "Biblioteca", "Coleções", "Ajustes"};
     unsigned widths[4], total = 0;
     for (int i = 0; i < 4; i++)
@@ -3672,8 +3693,7 @@ void draw_cover_flow(Canvas &c)
                     wide_art_state = 1;
                     char wide_path[120];
                     std::snprintf(wide_path, sizeof wide_path,
-                                  "/api/fs/download?path=/data/estante/covers/wide/%s.jpg",
-                                  games[idx].id);
+                                  "/api/fs/download?path=/user/appmeta/%s/pic0.png", games[idx].id);
                     start_request(9, wide_path);
                 }
                 if (i == home_cursor)
@@ -4585,8 +4605,7 @@ void request_visible_cover()
             wide_art_state = 1;
             char wide_path[120];
             std::snprintf(wide_path, sizeof wide_path,
-                          "/api/fs/download?path=/data/estante/covers/wide/%s.jpg",
-                          games[target].id);
+                          "/api/fs/download?path=/user/appmeta/%s/pic0.png", games[target].id);
             start_request(9, wide_path);
             return;
         }
@@ -4687,6 +4706,7 @@ void request_visible_cover()
         if (failed)
             continue;
         std::snprintf(requested_cover, 10, "%s", id);
+        requested_fallback[0] = 0;
         char path[320];
 #ifdef ESTANTE_GL
         requested_tall_path[0] = 0;
@@ -4710,7 +4730,10 @@ void request_visible_cover()
         }
         else
         {
-            std::snprintf(path, sizeof path, "/appdb/icon?id=%s", id);
+            // The 512 x 512 icon0.png the console keeps for every installed title; /appdb/icon only serves a
+            // 256 x 256 JPEG of it, which looked blurry and jagged once drawn at 450 pixels.
+            std::snprintf(path, sizeof path, "/api/fs/download?path=/user/appmeta/%s/icon0.png", id);
+            std::snprintf(requested_fallback, sizeof requested_fallback, "/appdb/icon?id=%s", id);
 #ifdef ESTANTE_GL
             std::snprintf(requested_tall_path, sizeof requested_tall_path,
                           "/api/fs/download?path=/data/estante/covers/%s.jpg", id);

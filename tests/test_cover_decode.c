@@ -23,6 +23,17 @@ int main(int argc,char** argv){
  size_t big_size=0;unsigned char *big=large_png(&big_size);assert(big_size>1024*1024);assert(decode_cover(big,big_size,pixels,256));assert(decode_cover_rect(big,big_size,pixels,256,256));free(big);
  assert(decode_cover(tga,sizeof tga,pixels,256));
  {
+  /* The wide-art reader takes 4K source pictures that the ordinary one refuses (side above 2400, up to 4096). */
+  size_t sz=18+4*3840;unsigned char *wide4k=calloc(sz,1);assert(wide4k);
+  wide4k[2]=2;wide4k[12]=3840&255;wide4k[13]=3840>>8;wide4k[14]=1;wide4k[16]=32;wide4k[17]=8;
+  for(size_t i=0;i<3840;i++){wide4k[18+4*i+1]=200;wide4k[18+4*i+3]=255;}
+  static uint32_t wide[480*270];
+  assert(!decode_cover_rect(wide4k,sz,wide,480,270));assert(decode_cover_rect_large(wide4k,sz,wide,480,270));
+  assert(!decode_cover_rect_large(wide4k,sz,wide,2049,270));
+  wide4k[12]=5000&255;wide4k[13]=5000>>8;sz=18+4*5000;wide4k=realloc(wide4k,sz);assert(wide4k);
+  assert(!decode_cover_rect_large(wide4k,sz,wide,480,270));free(wide4k);
+ }
+ {
   /* 4K box art is about 1530 x 2160: taller than 2048 but accepted; beyond 2400 a side is refused. */
   size_t tall_size=18+4*2200;unsigned char *tall=calloc(tall_size,1);assert(tall);
   tall[2]=2;tall[12]=1;tall[14]=2200&255;tall[15]=2200>>8;tall[16]=32;tall[17]=8;

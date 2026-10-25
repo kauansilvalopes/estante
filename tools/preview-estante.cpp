@@ -496,7 +496,7 @@ int main(int argc, char **argv)
                 !std::strncmp(t, "Platform: ", 10) || !std::strncmp(t, "Progress: ", 10) ||
                 !std::strncmp(t, "Favorites only: ", 16) || (t[0] && !t[1]) ||
                 !std::strcmp(t, "English") || !std::strcmp(t, "estante") ||
-                !std::strcmp(t, "0.5.2") || !t[0] || (t[0] >= '0' && t[0] <= '9') ||
+                !std::strcmp(t, "0.5.3") || !t[0] || (t[0] >= '0' && t[0] <= '9') ||
                 ((!std::strncmp(t, "PlayStation ", 12) || !std::strncmp(t, "Nintendo ", 9) ||
                   !std::strncmp(t, "GameCube", 8)) && std::strstr(t, "  ·  ")))
                 return; // brand, keyboard labels and already-formatted dynamic labels

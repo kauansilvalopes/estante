@@ -7,13 +7,13 @@
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_PNG
 #define STBI_ONLY_TGA
-#define STBI_MAX_DIMENSIONS 2400
+#define STBI_MAX_DIMENSIONS 4096
 #define STBI_NO_STDIO
 #define STBI_NO_HDR
 #define STBI_NO_LINEAR
 #define STBI_NO_SIMD
 #define STBI_NO_THREAD_LOCALS
-#define STBI_MAX_DIMENSIONS 2400
+#define STBI_MAX_DIMENSIONS 4096
 #include "../third_party/stb/stb_image.h"
 #include "cover_decode.h"
  // Bars around a letterboxed picture: instead of flat black, fill the square with the picture itself stretched
@@ -75,10 +75,10 @@ int decode_cover(const unsigned char* bytes,size_t length,uint32_t* pixels,unsig
 }
 // Fills dw x dh pixels with the picture scaled to cover the whole rectangle (centre crop, box filtered). Used for
 // the portrait cases of the GPU cover flow.
-int decode_cover_rect(const unsigned char* bytes,size_t length,uint32_t* pixels,unsigned dw,unsigned dh) {
+static int rect_decode(const unsigned char* bytes,size_t length,uint32_t* pixels,unsigned dw,unsigned dh,size_t max_length,unsigned max_dst,int max_src) {
  int w=0,h=0,channels=0;
- if(!bytes||!pixels||length==0||length>4u*1024u*1024u||dw==0||dh==0||dw>1024||dh>1024)return 0;
- if(!stbi_info_from_memory(bytes,(int)length,&w,&h,&channels)||w<=0||h<=0||w>2400||h>2400)return 0;
+ if(!bytes||!pixels||length==0||length>max_length||dw==0||dh==0||dw>max_dst||dh>max_dst)return 0;
+ if(!stbi_info_from_memory(bytes,(int)length,&w,&h,&channels)||w<=0||h<=0||w>max_src||h>max_src)return 0;
  unsigned char* rgba=stbi_load_from_memory(bytes,(int)length,&w,&h,&channels,4);
  if(!rgba)return 0;
  // Source window with the destination's aspect ratio, centred.
@@ -100,4 +100,13 @@ int decode_cover_rect(const unsigned char* bytes,size_t length,uint32_t* pixels,
   }
  }
  stbi_image_free(rgba);return 1;
+}
+int decode_cover_rect(const unsigned char* bytes,size_t length,uint32_t* pixels,unsigned dw,unsigned dh) {
+ return rect_decode(bytes,length,pixels,dw,dh,4u*1024u*1024u,1024,2400);
+}
+// The console keeps a 3840 x 2160 PNG of each game's key art (up to ~16 MB). This reads one and reduces it to the
+// wide picture of the game page: up to 32 MB in, 4096 pixels a side, 2048 out. Memory while it runs is about
+// 4.5 bytes a source pixel on top of the file (75 MB for 4K), so it must run one at a time.
+int decode_cover_rect_large(const unsigned char* bytes,size_t length,uint32_t* pixels,unsigned dw,unsigned dh) {
+ return rect_decode(bytes,length,pixels,dw,dh,32u*1024u*1024u,2048,4096);
 }
