@@ -103,28 +103,29 @@ int main()
         Library r{};
         Game g[] = {{"PPSA10001", "Native"}, {"PS2000001", "Two"},   {"PS1000002", "One"},
                     {"WII000003", "Cube"},   {"WIU000004", "Wii U"}, {"3DS000005", "Handheld"},
-                    {"NDS000006", "Dual"},   {"PS1000007", "One B"}};
+                    {"NDS000006", "Dual"},   {"PS1000007", "One B"}, {"NSW000008", "Switch game"}};
         r.folders[0] = {true, -1, "PS2 smart", false, 0, true, 2, 0, false};
         int rows[16]{};
         assert(collection_contains(r, g[1], 0));
         assert(!collection_contains(r, g[2], 0));
         assert(!collection_contains(r, g[3], 0));
-        assert(rail_games(r, g, 8, Rail::PS2, -1, rows, 16) == 1 && rows[0] == 1);
-        assert(rail_games(r, g, 8, Rail::PS1, -1, rows, 16) == 2);
-        assert(rail_games(r, g, 8, Rail::Wii, -1, rows, 16) == 1 && rows[0] == 3);
-        assert(rail_games(r, g, 8, Rail::WiiU, -1, rows, 16) == 1 && rows[0] == 4);
-        assert(rail_games(r, g, 8, Rail::N3DS, -1, rows, 16) == 1 && rows[0] == 5);
-        assert(rail_games(r, g, 8, Rail::NDS, -1, rows, 16) == 1 && rows[0] == 6);
+        assert(rail_games(r, g, 9, Rail::PS2, -1, rows, 16) == 1 && rows[0] == 1);
+        assert(rail_games(r, g, 9, Rail::PS1, -1, rows, 16) == 2);
+        assert(rail_games(r, g, 9, Rail::Wii, -1, rows, 16) == 1 && rows[0] == 3);
+        assert(rail_games(r, g, 9, Rail::WiiU, -1, rows, 16) == 1 && rows[0] == 4);
+        assert(rail_games(r, g, 9, Rail::N3DS, -1, rows, 16) == 1 && rows[0] == 5);
+        assert(rail_games(r, g, 9, Rail::NDS, -1, rows, 16) == 1 && rows[0] == 6);
+        assert(rail_games(r, g, 9, Rail::Switch, -1, rows, 16) == 1 && rows[0] == 8);
         Query q;
         q.view = 12; // PlayStation 1 filter
-        assert(select_games(r, g, 8, q, rows) == 2);
-        q.view = 13; // Nintendo filter: GameCube/Wii, Wii U, 3DS and DS together
-        assert(select_games(r, g, 8, q, rows) == 4);
+        assert(select_games(r, g, 9, q, rows) == 2);
+        q.view = 13; // Nintendo filter: GameCube/Wii, Wii U, 3DS, DS and Switch together
+        assert(select_games(r, g, 9, q, rows) == 5);
         q.view = 1; // PlayStation 2 filter must not pick up the other systems
-        assert(select_games(r, g, 8, q, rows) == 1);
+        assert(select_games(r, g, 9, q, rows) == 1);
         q.view = 0; // the PS2 platform chip is PS2 images only, not every emulator import
         q.platform = 2;
-        assert(select_games(r, g, 8, q, rows) == 1 && rows[0] == 1);
+        assert(select_games(r, g, 9, q, rows) == 1 && rows[0] == 1);
     }
     puts("PASS: search, hidden isolation, nested and smart collections, sorting, recency, v1 "
          "migration and v2 bounds.");

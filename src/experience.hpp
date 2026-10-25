@@ -32,7 +32,8 @@ enum class Rail
     Wii,
     WiiU,
     N3DS,
-    NDS
+    NDS,
+    Switch
 };
 int rail_games(const Library &, const Game *, int count, Rail kind, int folder, int *indices,
                int capacity);

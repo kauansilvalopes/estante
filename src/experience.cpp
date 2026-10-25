@@ -92,7 +92,7 @@ int select_games(const Library &d, const Game *games, int count, const Query &q,
             continue;
         int p = platform(g, d);
         const bool nintendo = id_starts(g.id, "WII") || id_starts(g.id, "WIU") ||
-                              id_starts(g.id, "3DS") || id_starts(g.id, "NDS");
+                              id_starts(g.id, "3DS") || id_starts(g.id, "NDS") || id_starts(g.id, "NSW");
         bool match = (q.view == 0 && (q.withApps || p != 1)) || q.view == 7 ||
                      (q.view == 1 && id_starts(g.id, "PS2")) || (q.view == 12 && id_starts(g.id, "PS1")) ||
                      (q.view == 13 && nintendo) ||
@@ -192,6 +192,7 @@ int rail_games(const Library &d, const Game *games, int count, Rail kind, int fo
     case Rail::WiiU:
     case Rail::N3DS:
     case Rail::NDS:
+    case Rail::Switch:
         q.view = 13; // every Nintendo system; the id prefix below picks one
         break;
     case Rail::Continue:
@@ -210,6 +211,8 @@ int rail_games(const Library &d, const Game *games, int count, Rail kind, int fo
         prefix = "3DS";
     else if (kind == Rail::NDS)
         prefix = "NDS";
+    else if (kind == Rail::Switch)
+        prefix = "NSW";
     int got = 0;
     for (int i = 0; i < n && got < capacity; i++)
     {

@@ -375,6 +375,33 @@ inline bool build_http_request(const char *path, char *out, std::size_t cap)
     return n >= 0 && static_cast<std::size_t>(n) < cap;
 }
 
+// True when two titles differ only in punctuation, spacing or case ("Bowsers Fury" and "Bowser's Fury"): the
+// ProsperoEden cover list names a game by its real title, the roms folder by a file-system safe one.
+inline bool same_title(const char *a, const char *b)
+{
+    if (!a || !b)
+        return false;
+    auto next = [](const char *&p) -> int
+    {
+        while (*p)
+        {
+            const unsigned char c = static_cast<unsigned char>(*p++);
+            if (std::isalnum(c))
+                return std::tolower(c);
+            if (c >= 0x80)
+                return c;
+        }
+        return -1;
+    };
+    for (;;)
+    {
+        const int x = next(a), y = next(b);
+        if (x != y)
+            return false;
+        if (x < 0)
+            return true;
+    }
+}
 inline bool import_slot_available(int count, int capacity, bool &limit_reached)
 {
     if (count < capacity)

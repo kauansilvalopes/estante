@@ -274,6 +274,7 @@ inline constexpr Entry table[] = {
     {"PlayStation 2", "PlayStation 2", "PlayStation 2"},
     {"PlayStation 1", "PlayStation 1", "PlayStation 1"},
     {"Nintendo", "Nintendo", "Nintendo"},
+    {"Nintendo Switch", "Nintendo Switch", "Nintendo Switch"},
     {"PlayStation 4", "PlayStation 4", "PlayStation 4"},
     {"PlayStation 5", "PlayStation 5", "PlayStation 5"},
     {"Ver tudo", "See all", "Ver todo"},

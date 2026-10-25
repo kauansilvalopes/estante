@@ -215,7 +215,7 @@ char emulator_path[max_games][200]{};
 // Artwork belongs to the emulator's own library, not to /appdb. Keeping the absolute path alongside
 // the virtual entry lets the regular cover cache load it without pretending it is a native title.
 char emulator_cover[max_games][200]{};
-unsigned char emulator_kind[max_games]{}; // 1 PS1, 2 GameCube/Wii, 3 Wii U, 4 Nintendo 3DS, 5 Nintendo DS
+unsigned char emulator_kind[max_games]{}; // 1 PS1, 2 GameCube/Wii, 3 Wii U, 4 Nintendo 3DS, 5 Nintendo DS, 6 Switch
 bool emulator_limit_reached = false;
 constexpr const char *swan_games_dir = "/data/SwanStationPS5/games";
 constexpr const char *swan_boxart_dir = "/data/SwanStationPS5/covers/boxart";
@@ -231,6 +231,12 @@ constexpr int ps1_cache_max = 128;
 char ps1_cache_name[ps1_cache_max][100]{}, ps1_cache_serial[ps1_cache_max][12]{};
 int ps1_cache_count = 0;
 constexpr const char *porpoise_games_dir = "/data/porpoise/games";
+// ProsperoEden (Switch): one folder per game under roms/, and covers/<hash>.tga with covers/<hash>.name holding the
+// real title. The .name files are read one by one to find which cover belongs to which game.
+constexpr const char *eden_roms_dir = "/data/prosperoeden/roms";
+constexpr const char *eden_covers_dir = "/data/prosperoeden/covers";
+char eden_cover_hash[64][12]{};
+int eden_cover_count = 0, eden_cover_job = 0;
 constexpr const char *ps5cemu_library = "/data/ps5cemu/library.json";
 // Boot serial of each PS2 image ("SLUS-20624"), read once from the start of the image and
 // remembered in /download0/ps2-serials.txt. state: 0 not read yet, 1 serial known, 2 no serial. The
@@ -537,6 +543,7 @@ void rebuild_rails()
     add_rail(Rail::WiiU, -1, "Wii U");
     add_rail(Rail::N3DS, -1, "Nintendo 3DS");
     add_rail(Rail::NDS, -1, "Nintendo DS");
+    add_rail(Rail::Switch, -1, "Nintendo Switch");
     // Rows keep their own cursor between rebuilds; the focused game stays focused when it moved.
     for (int i = 0; i < rail_count; i++)
         for (int k = 0; k < old_count; k++)
@@ -1119,6 +1126,7 @@ const char *system_name(int idx)
     case 3: return "Wii U";
     case 4: return "Nintendo 3DS";
     case 5: return "Nintendo DS";
+    case 6: return "Nintendo Switch";
     default: return "Emulador";
     }
 }
@@ -1133,6 +1141,7 @@ const char *system_tag(int idx)
     case 3: return "WII U";
     case 4: return "3DS";
     case 5: return "DS";
+    case 6: return "SWITCH";
     default: return "EMU";
     }
 }
@@ -1715,6 +1724,75 @@ void apply_porpoise_cache(char *text)
         line = next ? next + 1 : nullptr;
     }
 }
+void add_eden_games(const char *json)
+{
+    static const char *const formats[] = {".nsp", ".xci", ".nsz", ".xcz"};
+    cJSON *root = cJSON_Parse(json);
+    const cJSON *entries = root ? cJSON_GetObjectItemCaseSensitive(root, "entries") : nullptr;
+    const cJSON *entry = nullptr;
+    cJSON_ArrayForEach(entry, entries)
+    {
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(entry, "name");
+        const cJSON *dir = cJSON_GetObjectItemCaseSensitive(entry, "dir");
+        if (!cJSON_IsString(name) || !name->valuestring || name->valuestring[0] == '.' ||
+            (!cJSON_IsTrue(dir) && !emulator_extension(name->valuestring, formats, 4)))
+            continue;
+        char path[200];
+        if (!estante::join_import_path(eden_roms_dir, name->valuestring, path, sizeof path))
+            continue;
+        char title[192];
+        add_emulator_game("NSW", 6, "PPSA99008",
+                          cJSON_IsTrue(dir) ? name->valuestring
+                          : estante::clean_rom_title(name->valuestring, title, sizeof title) ? title
+                                                                                           : name->valuestring,
+                          path);
+    }
+    cJSON_Delete(root);
+}
+// covers/ lists "<hash>.tga" and "<hash>.name" pairs: remember the hashes, then read each .name.
+void read_eden_cover_list(const char *json)
+{
+    eden_cover_count = 0;
+    eden_cover_job = 0;
+    cJSON *root = cJSON_Parse(json);
+    const cJSON *entries = root ? cJSON_GetObjectItemCaseSensitive(root, "entries") : nullptr;
+    const cJSON *entry = nullptr;
+    cJSON_ArrayForEach(entry, entries)
+    {
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(entry, "name");
+        if (!cJSON_IsString(name) || !name->valuestring || eden_cover_count >= 64)
+            continue;
+        const std::size_t length = std::strlen(name->valuestring);
+        if (length < 6 || length - 5 >= sizeof eden_cover_hash[0] ||
+            std::strcmp(name->valuestring + length - 5, ".name") != 0)
+            continue;
+        std::memcpy(eden_cover_hash[eden_cover_count], name->valuestring, length - 5);
+        eden_cover_hash[eden_cover_count][length - 5] = 0;
+        eden_cover_count++;
+    }
+    cJSON_Delete(root);
+}
+// The title read from covers/<hash>.name belongs to the Switch game with the same title.
+void apply_eden_cover(const char *title)
+{
+    if (eden_cover_job < 0 || eden_cover_job >= eden_cover_count)
+        return;
+    for (int i = 0; i < count; i++)
+        if (emulator_kind[i] == 6 && !emulator_cover[i][0] && estante::same_title(games[i].name, title))
+        {
+            std::snprintf(emulator_cover[i], sizeof emulator_cover[i], "%s/%s.tga", eden_covers_dir,
+                          eden_cover_hash[eden_cover_job]);
+            break;
+        }
+}
+bool next_eden_cover_job(char *path, std::size_t cap)
+{
+    if (eden_cover_job >= eden_cover_count)
+        return false;
+    std::snprintf(path, cap, "/api/fs/download?path=%s/%s.name", eden_covers_dir,
+                  eden_cover_hash[eden_cover_job]);
+    return true;
+}
 void add_ps5cemu_system(const cJSON *items, const char *prefix, const char *fallback, unsigned char kind)
 {
     const cJSON *entry = nullptr;
@@ -1744,6 +1822,21 @@ void add_ps5cemu_games(const char *json)
         add_ps5cemu_system(cJSON_GetObjectItemCaseSensitive(root, "ds"), "NDS", "Nintendo DS game", 5);
     }
     cJSON_Delete(root);
+}
+// End of the scan chain: the 1024-game warning, or the one-time tip about the style switch.
+void finish_scan()
+{
+    if (estante::take_limit_warning(emulator_limit_reached))
+    {
+        msg("Limite de 1024 jogos: alguns não foram importados.");
+    }
+    else if (!style_tip_seen && screen == 0 && count > 0)
+    {
+        // Once, when the first scan ends: the style switch is easy to miss in Ajustes.
+        style_tip_seen = true;
+        save_preferences();
+        msg("Dica: L2 + R2 troca entre Estante e Catálogo.");
+    }
 }
 void poll_work()
 {
@@ -1914,17 +2007,39 @@ void poll_work()
             add_ps5cemu_games(response);
             rebuild();
         }
-        if (estante::take_limit_warning(emulator_limit_reached))
+        next = 22;
+        std::snprintf(path, sizeof path, "/api/fs/list?path=%s", eden_roms_dir);
+    }
+    else if (work_kind == 22)
+    {
+        if (response_ok && editing_collection < 0)
         {
-            msg("Limite de 1024 jogos: alguns não foram importados.");
+            add_eden_games(response);
+            rebuild();
         }
-        else if (!style_tip_seen && screen == 0 && count > 0)
-        {
-            // Once, when the first scan ends: the style switch is easy to miss in Ajustes.
-            style_tip_seen = true;
-            save_preferences();
-            msg("Dica: L2 + R2 troca entre Estante e Catálogo.");
-        }
+        next = 23;
+        std::snprintf(path, sizeof path, "/api/fs/list?path=%s", eden_covers_dir);
+    }
+    else if (work_kind == 23)
+    {
+        eden_cover_count = eden_cover_job = 0;
+        if (response_ok && editing_collection < 0)
+            read_eden_cover_list(response);
+        if (next_eden_cover_job(path, sizeof path))
+            next = 24;
+        else
+            finish_scan();
+    }
+    else if (work_kind == 24)
+    {
+        if (response_ok)
+            apply_eden_cover(response);
+        eden_cover_job++;
+        cover_version++;
+        if (next_eden_cover_job(path, sizeof path))
+            next = 24;
+        else
+            finish_scan();
     }
     else if (work_kind == 10)
     {
@@ -3383,7 +3498,7 @@ void breadcrumb(char *out, std::size_t cap, int slot)
 void draw_top(Canvas &c)
 {
     text(c, 100, 30, "estante", 40, white, 260);
-    text(c, 285, 44, "0.5.3", 22, muted, 90);
+    text(c, 285, 44, "0.5.4", 22, muted, 90);
     const char *tabs[] = {"Início", "Biblioteca", "Coleções", "Ajustes"};
     unsigned widths[4], total = 0;
     for (int i = 0; i < 4; i++)

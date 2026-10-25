@@ -159,6 +159,15 @@ int main()
         assert(!estante::ps1_boot_serial(image.data(), image.size(), serial, 4));
     }
 
+    // ProsperoEden: the cover list uses the real title, the roms folder a file-system safe one.
+    assert(estante::same_title("Super Mario 3D World + Bowsers Fury", "Super Mario 3D World + Bowser's Fury"));
+    assert(estante::same_title("Donkey Kong Country Tropical Freeze", "Donkey Kong Country: Tropical Freeze"));
+    assert(estante::same_title("mario kart 8 deluxe", "Mario Kart 8 Deluxe"));
+    assert(estante::same_title("Mario Kart 8 Deluxe", "Mario Kart 8 Deluxe") &&
+           !estante::same_title("Mario Kart 8 Deluxe", "Mario Kart 8") &&
+           !estante::same_title("Mario Kart 8", "Mario Kart 8 Deluxe") && !estante::same_title("", "A") &&
+           !estante::same_title(nullptr, "A"));
+
     char long_name[220];
     std::memset(long_name, 'x', sizeof long_name - 1);
     long_name[sizeof long_name - 1] = 0;
