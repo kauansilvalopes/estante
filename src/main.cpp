@@ -3498,7 +3498,7 @@ void breadcrumb(char *out, std::size_t cap, int slot)
 void draw_top(Canvas &c)
 {
     text(c, 100, 30, "estante", 40, white, 260);
-    text(c, 285, 44, "0.5.4", 22, muted, 90);
+    text(c, 285, 44, "0.5.5", 22, muted, 90);
     const char *tabs[] = {"Início", "Biblioteca", "Coleções", "Ajustes"};
     unsigned widths[4], total = 0;
     for (int i = 0; i < 4; i++)
