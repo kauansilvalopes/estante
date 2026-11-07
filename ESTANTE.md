@@ -71,11 +71,12 @@ O formato ffpfsc continua sujeito às limitações experimentais da ShadowMount.
 
 ## Limites e validação
 
-Até 1024 títulos e 32 coleções. O app lê apenas as pastas padrão em `/data` dos emuladores:
-PS5SX2 (`/data/PCSX2/games`), SwanStationPS5 (`/data/SwanStationPS5/games`), Porpoise
-(`/data/porpoise/games`) e PS5-ECAM (`/data/ps5cemu/library.json`). Abra os emuladores uma vez
-antes de atualizar a biblioteca. USB/M.2 e Switch não são importados; 3DS/DS dependem de o ECAM
-ter escaneado os jogos. PS2 portado como PS4 precisa de classificação manual. ISOs do PS5SX2
+Até 1024 títulos e 32 coleções. O app lê as pastas dos emuladores no armazenamento interno (`/data`) e no M.2 ou em um segundo
+disco estendido (`/mnt/ext1`, `/mnt/ext0`), e junta os jogos: PS5SX2 (`PCSX2/games`), SwanStationPS5
+(`SwanStationPS5/games`), Porpoise (`/data/porpoise/games`, `Dolphin/wii`, `Dolphin/gamecube`,
+`games/wii`, `games/gamecube`), ProsperoEden (`emulators/prosperoeden/roms`) e PS5-ECAM
+(`/data/ps5cemu/library.json`). Abra os emuladores uma vez antes de atualizar a biblioteca.
+USB não é lido; 3DS/DS dependem de o ECAM ter escaneado os jogos. PS2 portado como PS4 precisa de classificação manual. ISOs do PS5SX2
 não aparecem como apps do catálogo. O app não mede tempo de jogo, não lê histórico global e não
 sincroniza dados na nuvem.
 

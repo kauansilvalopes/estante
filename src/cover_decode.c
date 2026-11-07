@@ -53,7 +53,7 @@ static void fill_backdrop(uint32_t* pixels,unsigned edge,const unsigned char* rg
 }
 int decode_cover(const unsigned char* bytes,size_t length,uint32_t* pixels,unsigned edge) {
  int w=0,h=0,channels=0;
- if(!bytes||!pixels||length==0||length>4u*1024u*1024u||edge==0||edge>512)return 0;
+ if(!bytes||!pixels||length==0||length>12u*1024u*1024u||edge==0||edge>512)return 0;
  if(!stbi_info_from_memory(bytes,(int)length,&w,&h,&channels)||w<=0||h<=0||w>2400||h>2400)return 0;
  unsigned char* rgba=stbi_load_from_memory(bytes,(int)length,&w,&h,&channels,4);
  if(!rgba)return 0;
@@ -102,7 +102,7 @@ static int rect_decode(const unsigned char* bytes,size_t length,uint32_t* pixels
  stbi_image_free(rgba);return 1;
 }
 int decode_cover_rect(const unsigned char* bytes,size_t length,uint32_t* pixels,unsigned dw,unsigned dh) {
- return rect_decode(bytes,length,pixels,dw,dh,4u*1024u*1024u,1024,2400);
+ return rect_decode(bytes,length,pixels,dw,dh,12u*1024u*1024u,1024,2400);
 }
 // The console keeps a 3840 x 2160 PNG of each game's key art (up to ~16 MB). This reads one and reduces it to the
 // wide picture of the game page: up to 32 MB in, 4096 pixels a side, 2048 out. Memory while it runs is about

@@ -1,6 +1,7 @@
 #include "../src/experience.hpp"
 #include "../src/cJSON.h"
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <cstdio>
 using namespace estante;
@@ -126,6 +127,32 @@ int main()
         q.view = 0; // the PS2 platform chip is PS2 images only, not every emulator import
         q.platform = 2;
         assert(select_games(r, g, 9, q, rows) == 1 && rows[0] == 1);
+        q.platform = 6; // the PlayStation 1 chip: only the PS1 imports
+        assert(select_games(r, g, 9, q, rows) == 2 && rows[0] == 2 && rows[1] == 7);
+        q.platform = 7; // the Nintendo chip: every Nintendo system together
+        assert(select_games(r, g, 9, q, rows) == 5);
+        // A platform the player chose by hand also counts: a native title marked Nintendo or PS1.
+        metadata(r, "PPSA10001")->platform = 7;
+        const int nintendo_count = select_games(r, g, 9, q, rows);
+        bool has_native = false;
+        for (int i = 0; i < nintendo_count; i++)
+            has_native = has_native || rows[i] == 0;
+        assert(nintendo_count == 6 && has_native);
+        metadata(r, "PPSA10001")->platform = 6;
+        q.platform = 6;
+        assert(select_games(r, g, 9, q, rows) == 3 && rows[0] == 0);
+        q.platform = 0;
+        q.view = 12; // the PlayStation 1 view lists it too
+        assert(select_games(r, g, 9, q, rows) == 3);
+        // The new platform codes are valid in a saved library (a smart collection and a game).
+        r.folders[1] = {true, -1, "Nintendo smart", false, 0, true, 7, 0, false};
+        assert(valid_library(r));
+        assert(collection_contains(r, g[3], 1) && collection_contains(r, g[8], 1) && !collection_contains(r, g[2], 1));
+        char *saved = write_library(r);
+        Library back{};
+        assert(read_library(saved, back) && back.folders[1].rulePlatform == 7 &&
+               metadata(back, "PPSA10001")->platform == 6);
+        std::free(saved);
     }
     puts("PASS: search, hidden isolation, nested and smart collections, sorting, recency, v1 "
          "migration and v2 bounds.");

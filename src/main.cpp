@@ -192,7 +192,9 @@ std::uint64_t cover_clock = 0;
 char failed_covers[max_games][10]{};
 int failed_cover_count = 0;
 std::atomic<int> work{0};
-char request_path[768]{}, response[4 * 1024 * 1024]{};
+// 12 MiB: PS5SX2 keeps some box art as PNGs of 4 to 8 MB (Budokai Tenkaichi 3, Guitar Hero, Midnight Club 3).
+constexpr std::size_t response_capacity = 12u * 1024u * 1024u;
+char request_path[768]{}, response[response_capacity]{};
 std::size_t response_size = 0;
 int work_kind = 0, pending_kind = 0;
 char pending_path[768]{};
@@ -206,7 +208,26 @@ char requested_tall_path[768]{};
 // PS2 images found in the PS5SX2 games folder: file name (with extension) per library slot, empty
 // for normal titles. The id is made up ("PS2" + hash) because an image has no title id.
 char ps2_file[max_games][144]{};
-constexpr const char *ps2_games_dir = "/data/PCSX2/games";
+// Each emulator keeps its games on the internal storage (/data) or on the extended storage (the M.2 shows up
+// as /mnt/ext1, a second drive as /mnt/ext0). Every folder is read and the games are added together; a folder
+// that does not exist lists as empty. The folder each PS2 and PS1 game came from is kept for the serial reads.
+constexpr const char *ps2_roots[] = {"/data/PCSX2/games", "/mnt/ext1/PCSX2/games", "/mnt/ext0/PCSX2/games"};
+constexpr const char *swan_roots[] = {"/data/SwanStationPS5/games", "/mnt/ext1/SwanStationPS5/games",
+                                      "/mnt/ext0/SwanStationPS5/games"};
+constexpr const char *porpoise_roots[] = {"/data/porpoise/games",     "/mnt/ext1/Dolphin/wii",
+                                          "/mnt/ext1/Dolphin/gamecube", "/mnt/ext1/games/wii",
+                                          "/mnt/ext1/games/gamecube", "/mnt/ext0/Dolphin/wii",
+                                          "/mnt/ext0/Dolphin/gamecube", "/mnt/ext0/games/wii",
+                                          "/mnt/ext0/games/gamecube"};
+constexpr const char *eden_roots[] = {"/data/prosperoeden/roms", "/mnt/ext1/emulators/prosperoeden/roms",
+                                      "/mnt/ext0/emulators/prosperoeden/roms"};
+template <typename T, std::size_t N> constexpr int root_count(const T (&)[N])
+{
+    return static_cast<int>(N);
+}
+int ps2_pass = 0, swan_pass = 0, porpoise_pass = 0, eden_pass = 0;
+const char *ps2_dir_of[max_games]{};
+const char *swan_dir_of[max_games]{};
 constexpr const char *ps2_listed_serials = "/data/PCSX2/chd-serials.txt";
 // Entries imported from another emulator library. They have a stable synthetic id so they can use
 // Estante's normal metadata, while `emulator_app` identifies the frontend to open.
@@ -217,7 +238,6 @@ char emulator_path[max_games][200]{};
 char emulator_cover[max_games][200]{};
 unsigned char emulator_kind[max_games]{}; // 1 PS1, 2 GameCube/Wii, 3 Wii U, 4 Nintendo 3DS, 5 Nintendo DS, 6 Switch
 bool emulator_limit_reached = false;
-constexpr const char *swan_games_dir = "/data/SwanStationPS5/games";
 constexpr const char *swan_boxart_dir = "/data/SwanStationPS5/covers/boxart";
 constexpr const char *swan_default_dir = "/data/SwanStationPS5/covers/default";
 // SwanStationPS5 keeps two cover sets: boxart/<title>.png and default/<serial>.jpg. A game whose localized
@@ -230,10 +250,8 @@ int ps1_default_count = 0, ps1_job = -1;
 constexpr int ps1_cache_max = 128;
 char ps1_cache_name[ps1_cache_max][100]{}, ps1_cache_serial[ps1_cache_max][12]{};
 int ps1_cache_count = 0;
-constexpr const char *porpoise_games_dir = "/data/porpoise/games";
 // ProsperoEden (Switch): one folder per game under roms/, and covers/<hash>.tga with covers/<hash>.name holding the
 // real title. The .name files are read one by one to find which cover belongs to which game.
-constexpr const char *eden_roms_dir = "/data/prosperoeden/roms";
 constexpr const char *eden_covers_dir = "/data/prosperoeden/covers";
 char eden_cover_hash[64][12]{};
 int eden_cover_count = 0, eden_cover_job = 0;
@@ -292,6 +310,24 @@ const char *views[] = {"Todos os jogos", "PlayStation 2", "PlayStation 4", "Play
 // Order shown in the filter list (ids stay as they are): Apps right after "Todos os jogos".
 constexpr int view_order[] = {0, 4, 3, 2, 12, 1, 13, 5, 6, 7, 8, 9, 10, 11};
 constexpr int view_order_count = sizeof view_order / sizeof *view_order;
+// "Plataforma" in the game menu offers the same systems as the Biblioteca list (PS5, PS4, PS1, PS2, Nintendo, apps).
+struct PlatformChoice
+{
+    const char *name;
+    int value;
+};
+constexpr PlatformChoice platform_choices[] = {{"PlayStation 5", 5}, {"PlayStation 4", 4}, {"PlayStation 1", 6},
+                                               {"PlayStation 2", 2}, {"Nintendo", 7},       {"Outro / aplicativo", 1}};
+constexpr int platform_choice_count = sizeof platform_choices / sizeof *platform_choices;
+// The platform filter steps through the same systems, in the same order, and ends on "Todas" (0).
+int next_platform_filter(int current)
+{
+    static constexpr int order[] = {0, 5, 4, 6, 2, 7};
+    for (std::size_t i = 0; i < sizeof order / sizeof *order; i++)
+        if (order[i] == current)
+            return order[(i + 1) % (sizeof order / sizeof *order)];
+    return 0;
+}
 const char *statuses[] = {"Sem status", "Quero jogar", "Em andamento", "Concluído"};
 const char *sorts[] = {"Nome A-Z", "Plataforma", "Últimas escolhas", "Favoritos primeiro"};
 const Meta *meta(int idx)
@@ -842,11 +878,15 @@ void *worker(void *)
                 FILE *f = std::fopen(tmp, "wb");
                 if (f)
                 {
-                    bool ok = std::fwrite(requested_cover, 1, 10, f) == 10 &&
+                    // Only covers up to 4 MiB are kept in the 32 cache files; a larger one is fetched again.
+                    bool ok = response_size <= 4u * 1024u * 1024u &&
+                              std::fwrite(requested_cover, 1, 10, f) == 10 &&
                               std::fwrite(response, 1, response_size, f) == response_size;
                     ok = std::fclose(f) == 0 && ok;
                     if (ok)
                         rename(tmp, cache);
+                    else
+                        remove(tmp);
                 }
             }
         }
@@ -1221,7 +1261,7 @@ bool next_ps2_job(char *path, std::size_t cap)
         if (!ps2_file[i][0] || ps2_state[i] != 0)
             continue;
         char file[160], full[200];
-        std::snprintf(full, sizeof full, "%s/%s", ps2_games_dir, ps2_file[i]);
+        std::snprintf(full, sizeof full, "%s/%s", ps2_dir_of[i] ? ps2_dir_of[i] : ps2_roots[0], ps2_file[i]);
         ps2_encode_path(full, file, sizeof file);
         if (std::strlen(file) + 24 >= cap)
         {
@@ -1339,6 +1379,8 @@ void drop_imported_games()
     std::memset(games + first, 0, sizeof(games[0]) * rest);
     std::memset(selected + first, 0, sizeof(selected[0]) * rest);
     std::memset(ps2_file + first, 0, sizeof(ps2_file[0]) * rest);
+    std::memset(ps2_dir_of + first, 0, sizeof(ps2_dir_of[0]) * rest);
+    std::memset(swan_dir_of + first, 0, sizeof(swan_dir_of[0]) * rest);
     std::memset(ps2_serial + first, 0, sizeof(ps2_serial[0]) * rest);
     std::memset(ps2_state + first, 0, rest);
     std::memset(emulator_app + first, 0, sizeof(emulator_app[0]) * rest);
@@ -1354,9 +1396,8 @@ void drop_imported_games()
     ps1_job = -1;
     count = first;
 }
-void add_ps2_games(const char *json)
+void add_ps2_games(const char *json, const char *folder)
 {
-    drop_imported_games();
     cJSON *root = cJSON_Parse(json);
     const cJSON *list = root ? cJSON_GetObjectItemCaseSensitive(root, "entries") : nullptr;
     const cJSON *e = nullptr;
@@ -1390,6 +1431,7 @@ void add_ps2_games(const char *json)
         std::snprintf(games[count].id, sizeof games[count].id, "%s", id);
         std::snprintf(games[count].name, sizeof games[count].name, "%s", stem);
         std::snprintf(ps2_file[count], sizeof ps2_file[count], "%s", name->valuestring);
+        ps2_dir_of[count] = folder;
         for (int c = 0; c < ps2_cache_count; c++)
             if (!std::strcmp(ps2_cache_name[c], name->valuestring))
             {
@@ -1446,7 +1488,7 @@ void add_emulator_game(const char *prefix, unsigned char kind, const char *app, 
     emulator_kind[count] = kind;
     count++;
 }
-void add_swan_games(const char *json)
+void add_swan_games(const char *json, const char *folder)
 {
     cJSON *root = cJSON_Parse(json);
     const cJSON *entries = root ? cJSON_GetObjectItemCaseSensitive(root, "entries") : nullptr;
@@ -1458,10 +1500,13 @@ void add_swan_games(const char *json)
         if (!cJSON_IsString(name) || !cJSON_IsTrue(dir))
             continue;
         char path[200], cover[200];
-        if (!estante::make_swan_paths(swan_games_dir, "/data/SwanStationPS5/covers/boxart",
+        if (!estante::make_swan_paths(folder, "/data/SwanStationPS5/covers/boxart",
                                       name->valuestring, path, sizeof path, cover, sizeof cover))
             continue;
+        const int before = count;
         add_emulator_game("PS1", 1, "PPSA98510", name->valuestring, path, cover);
+        if (count > before)
+            swan_dir_of[before] = folder;
     }
     cJSON_Delete(root);
 }
@@ -1581,7 +1626,7 @@ bool next_ps1_job(char *path, std::size_t cap)
             std::snprintf(ps1_serial[i], sizeof ps1_serial[0], "%s", known ? ps1_cache_serial[cached] : "");
             continue;
         }
-        const int n = std::snprintf(path, cap, "/api/fs/list?path=%s/%s", swan_games_dir, games[i].name);
+        const int n = std::snprintf(path, cap, "/api/fs/list?path=%s/%s", swan_dir_of[i] ? swan_dir_of[i] : swan_roots[0], games[i].name);
         if (n < 0 || static_cast<std::size_t>(n) + 1 >= cap || !request_fits(path))
         {
             ps1_state[i] = 2; // folder name too long to ask for
@@ -1613,7 +1658,8 @@ bool ps1_track_request(const char *json, char *path, std::size_t cap)
     cJSON_Delete(root);
     if (!best[0] || ps1_job < 0 || ps1_job >= count)
         return false;
-    const int n = std::snprintf(path, cap, "/api/fs/download?path=%s/%s/%s", swan_games_dir,
+    const int n = std::snprintf(path, cap, "/api/fs/download?path=%s/%s/%s",
+                                swan_dir_of[ps1_job] ? swan_dir_of[ps1_job] : swan_roots[0],
                                 games[ps1_job].name, best);
     return n > 0 && static_cast<std::size_t>(n) + 1 < cap && request_fits(path);
 }
@@ -1661,10 +1707,11 @@ int ps1_continue(char *path, std::size_t cap)
     if (next_ps1_job(path, cap))
         return 19;
     apply_ps1_covers();
-    std::snprintf(path, cap, "/api/fs/list?path=%s", porpoise_games_dir);
+    porpoise_pass = 0;
+    std::snprintf(path, cap, "/api/fs/list?path=%s", porpoise_roots[0]);
     return 14;
 }
-void add_porpoise_games(const char *json)
+void add_porpoise_games(const char *json, const char *folder)
 {
     static const char *const formats[] = {".iso", ".gcm", ".rvz", ".ciso", ".gcz", ".wbfs",
                                           ".wia", ".wad"};
@@ -1679,7 +1726,7 @@ void add_porpoise_games(const char *json)
             !emulator_extension(name->valuestring, formats, 8))
             continue;
         char path[200];
-        if (!estante::join_import_path(porpoise_games_dir, name->valuestring, path, sizeof path))
+        if (!estante::join_import_path(folder, name->valuestring, path, sizeof path))
             continue;
         char title[192];
         add_emulator_game("WII", 2, "PPSA99764",
@@ -1724,7 +1771,7 @@ void apply_porpoise_cache(char *text)
         line = next ? next + 1 : nullptr;
     }
 }
-void add_eden_games(const char *json)
+void add_eden_games(const char *json, const char *folder)
 {
     static const char *const formats[] = {".nsp", ".xci", ".nsz", ".xcz"};
     cJSON *root = cJSON_Parse(json);
@@ -1738,7 +1785,7 @@ void add_eden_games(const char *json)
             (!cJSON_IsTrue(dir) && !emulator_extension(name->valuestring, formats, 4)))
             continue;
         char path[200];
-        if (!estante::join_import_path(eden_roms_dir, name->valuestring, path, sizeof path))
+        if (!estante::join_import_path(folder, name->valuestring, path, sizeof path))
             continue;
         char title[192];
         add_emulator_game("NSW", 6, "PPSA99008",
@@ -1893,21 +1940,34 @@ void poll_work()
             rebuild();
         }
         next = 7;
-        std::snprintf(path, sizeof path, "/api/fs/list?path=%s", ps2_games_dir);
+        ps2_pass = 0;
+        std::snprintf(path, sizeof path, "/api/fs/list?path=%s", ps2_roots[0]);
     }
     else if (work_kind == 7)
     {
-        if (response_ok && editing_collection < 0)
+        if (editing_collection < 0)
         {
-            add_ps2_games(response);
-            rebuild();
-            next = 21; // serials PS5SX2 already knows, for the images the disc reader cannot open
-            std::snprintf(path, sizeof path, "/api/fs/download?path=%s", ps2_listed_serials);
+            if (ps2_pass == 0)
+                drop_imported_games(); // the whole imported block is built again, folder by folder
+            if (response_ok)
+                add_ps2_games(response, ps2_roots[ps2_pass]);
+            if (++ps2_pass < root_count(ps2_roots))
+            {
+                next = 7;
+                std::snprintf(path, sizeof path, "/api/fs/list?path=%s", ps2_roots[ps2_pass]);
+            }
+            else
+            {
+                rebuild();
+                next = 21; // serials PS5SX2 already knows, for the images the disc reader cannot open
+                std::snprintf(path, sizeof path, "/api/fs/download?path=%s", ps2_listed_serials);
+            }
         }
         if (!next)
         {
             next = 13;
-            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", swan_games_dir);
+            swan_pass = 0;
+            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", swan_roots[0]);
         }
     }
     else if (work_kind == 21)
@@ -1919,7 +1979,8 @@ void poll_work()
         else
         {
             next = 13;
-            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", swan_games_dir);
+            swan_pass = 0;
+            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", swan_roots[0]);
         }
     }
     else if (work_kind == 8)
@@ -1935,18 +1996,26 @@ void poll_work()
         else
         {
             next = 13;
-            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", swan_games_dir);
+            swan_pass = 0;
+            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", swan_roots[0]);
         }
     }
     else if (work_kind == 13)
     {
         if (response_ok && editing_collection < 0)
+            add_swan_games(response, swan_roots[swan_pass]);
+        if (editing_collection < 0 && ++swan_pass < root_count(swan_roots))
         {
-            add_swan_games(response);
-            rebuild();
+            next = 13;
+            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", swan_roots[swan_pass]);
         }
-        next = 17;
-        std::snprintf(path, sizeof path, "/api/fs/list?path=%s", swan_boxart_dir);
+        else
+        {
+            if (editing_collection < 0)
+                rebuild();
+            next = 17;
+            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", swan_boxart_dir);
+        }
     }
     else if (work_kind == 17)
     {
@@ -1983,12 +2052,19 @@ void poll_work()
     else if (work_kind == 14)
     {
         if (response_ok && editing_collection < 0)
+            add_porpoise_games(response, porpoise_roots[porpoise_pass]);
+        if (editing_collection < 0 && ++porpoise_pass < root_count(porpoise_roots))
         {
-            add_porpoise_games(response);
-            rebuild();
+            next = 14;
+            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", porpoise_roots[porpoise_pass]);
         }
-        next = 16;
-        std::snprintf(path, sizeof path, "/api/fs/download?path=/data/porpoise/disc-cache.tsv");
+        else
+        {
+            if (editing_collection < 0)
+                rebuild();
+            next = 16;
+            std::snprintf(path, sizeof path, "/api/fs/download?path=/data/porpoise/disc-cache.tsv");
+        }
     }
     else if (work_kind == 16)
     {
@@ -2008,17 +2084,25 @@ void poll_work()
             rebuild();
         }
         next = 22;
-        std::snprintf(path, sizeof path, "/api/fs/list?path=%s", eden_roms_dir);
+        eden_pass = 0;
+        std::snprintf(path, sizeof path, "/api/fs/list?path=%s", eden_roots[0]);
     }
     else if (work_kind == 22)
     {
         if (response_ok && editing_collection < 0)
+            add_eden_games(response, eden_roots[eden_pass]);
+        if (editing_collection < 0 && ++eden_pass < root_count(eden_roots))
         {
-            add_eden_games(response);
-            rebuild();
+            next = 22;
+            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", eden_roots[eden_pass]);
         }
-        next = 23;
-        std::snprintf(path, sizeof path, "/api/fs/list?path=%s", eden_covers_dir);
+        else
+        {
+            if (editing_collection < 0)
+                rebuild();
+            next = 23;
+            std::snprintf(path, sizeof path, "/api/fs/list?path=%s", eden_covers_dir);
+        }
     }
     else if (work_kind == 23)
     {
@@ -2933,7 +3017,7 @@ void input(std::uint32_t b)
     }
     if (modal >= 6 && modal <= 8)
     {
-        int n = modal == 7 ? 4 : 4;
+        int n = modal == 7 ? platform_choice_count : 4;
         if (b & CIRCLE)
         {
             modal = 0;
@@ -2954,7 +3038,7 @@ void input(std::uint32_t b)
             }
             else if (mode == 7)
             {
-                int value = menu_cursor == 0 ? 2 : menu_cursor == 1 ? 4 : menu_cursor == 2 ? 5 : 1;
+                int value = platform_choices[menu_cursor].value;
                 update_targets([value](Meta &m) { m.platform = value; });
             }
             else if (menu_kind == 1)
@@ -2993,8 +3077,7 @@ void input(std::uint32_t b)
         {
             if (menu_cursor == 0)
             {
-                int p = query.platform;
-                query.platform = p == 0 ? 2 : p == 2 ? 4 : p == 4 ? 5 : 0;
+                query.platform = next_platform_filter(query.platform);
             }
             if (menu_cursor == 1)
                 query.status = (query.status + 1) % 4;
@@ -3498,7 +3581,7 @@ void breadcrumb(char *out, std::size_t cap, int slot)
 void draw_top(Canvas &c)
 {
     text(c, 100, 30, "estante", 40, white, 260);
-    text(c, 285, 44, "0.5.6", 22, muted, 90);
+    text(c, 285, 44, "0.5.7", 22, muted, 90);
     const char *tabs[] = {"Início", "Biblioteca", "Coleções", "Ajustes"};
     unsigned widths[4], total = 0;
     for (int i = 0; i < 4; i++)
@@ -3969,11 +4052,16 @@ hui::gfx::Color gfx_alpha(Color color, float alpha)
 #endif
 const char *platform_name(int p)
 {
-    return p == 2 ? "PlayStation 2" : p == 4 ? "PlayStation 4" : p == 5 ? "PlayStation 5" : "Aplicativo";
+    return p == 2   ? "PlayStation 2"
+           : p == 4 ? "PlayStation 4"
+           : p == 5 ? "PlayStation 5"
+           : p == 6 ? "PlayStation 1"
+           : p == 7 ? "Nintendo"
+                    : "Aplicativo";
 }
 const char *platform_tag(int p)
 {
-    return p == 2 ? "PS2" : p == 4 ? "PS4" : p == 5 ? "PS5" : "APP";
+    return p == 2 ? "PS2" : p == 4 ? "PS4" : p == 5 ? "PS5" : p == 6 ? "PS1" : p == 7 ? "NINTENDO" : "APP";
 }
 // Text that is already translated or made of data (names, ids, joined facts): no second lookup.
 void raw_text(Canvas &c, unsigned x, unsigned y, const char *s, unsigned size = 28,
@@ -4123,15 +4211,16 @@ void centered_in(Canvas &c, unsigned x, unsigned width, unsigned y, const char *
 // A small label on a card corner identifies both native platforms and emulator systems.
 void card_tag(Canvas &c, unsigned x, unsigned y, int idx)
 {
-    // Wide enough for the longest label ("WII U"): the tag grows with its text instead of cutting it.
-    const unsigned measured = measure_face(c, system_tag(idx), 18) + 20;
+    // Same look as the badge the PS5 home screen puts over a game: a white plate with dark lettering.
+    // Wide enough for the longest label ("SWITCH"): the plate grows with its text instead of cutting it.
+    const unsigned measured = measure_face(c, system_tag(idx), 20) + 24;
 #ifdef ESTANTE_GL
-    const unsigned tag_w = measured < 54 ? 54 : measured;
+    const unsigned tag_w = measured < 66 ? 66 : measured;
 #else
-    const unsigned tag_w = measured < 82 ? 82 : measured;
+    const unsigned tag_w = measured < 88 ? 88 : measured;
 #endif
-    c.rounded_rectangle(x, y, tag_w, 28, 8, shade(14, 16, 20));
-    raw_text(c, x + 9, y + 2, system_tag(idx), 18, white, tag_w - 10);
+    c.rounded_rectangle(x, y, tag_w, 32, 8, white);
+    raw_text(c, x + (tag_w - measured + 24) / 2, y + 3, system_tag(idx), 20, shade(14, 16, 20), tag_w - 10);
 }
 void card_ring(Canvas &c, unsigned x, unsigned y, unsigned w, unsigned h, unsigned radius)
 {
@@ -4643,11 +4732,9 @@ void draw_modal(Canvas &c)
     }
     if (modal == 7)
     {
-        total = 4;
-        entries[0] = "PlayStation 2";
-        entries[1] = "PlayStation 4";
-        entries[2] = "PlayStation 5";
-        entries[3] = "Outro / aplicativo";
+        total = platform_choice_count;
+        for (int i = 0; i < total; i++)
+            entries[i] = platform_choices[i].name;
     }
     if (modal == 8)
     {
@@ -4662,6 +4749,8 @@ void draw_modal(Canvas &c)
                       query.platform == 2   ? "PS2"
                       : query.platform == 4 ? "PS4"
                       : query.platform == 5 ? "PS5"
+                      : query.platform == 6 ? "PS1"
+                      : query.platform == 7 ? "Nintendo"
                                             : tr("Todas"));
         std::snprintf(filterlabels[1], 120, tr("Progresso: %s"),
                       query.status ? tr(statuses[query.status]) : tr("Todos"));

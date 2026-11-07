@@ -242,6 +242,24 @@ int platform(const Game &g, const Library &d)
         return m->platform;
     return default_platform(g.id);
 }
+static bool nintendo_id(const char *id)
+{
+    return starts_with(id, "WII") || starts_with(id, "WIU") || starts_with(id, "3DS") ||
+           starts_with(id, "NDS") || starts_with(id, "NSW");
+}
+bool platform_matches(const Game &g, const Library &d, int wanted)
+{
+    if (!wanted)
+        return true;
+    const int p = platform(g, d);
+    if (wanted == 2)
+        return starts_with(g.id, "PS2");
+    if (wanted == 6)
+        return starts_with(g.id, "PS1") || p == 6;
+    if (wanted == 7)
+        return nintendo_id(g.id) || p == 7;
+    return p == wanted;
+}
 bool valid_library(const Library &d)
 {
     if (d.count < 0 || d.count > max_games)
@@ -251,7 +269,7 @@ bool valid_library(const Library &d)
         if (d.folders[i].used)
         {
             if (d.folders[i].sort < 0 || d.folders[i].sort > 3 || d.folders[i].rulePlatform < 0 ||
-                d.folders[i].rulePlatform > 5 || d.folders[i].rulePlatform == 3 ||
+                d.folders[i].rulePlatform > 7 || d.folders[i].rulePlatform == 3 ||
                 d.folders[i].ruleStatus < 0 || d.folders[i].ruleStatus > 3)
                 return false;
             used |= std::uint32_t(1) << i;
@@ -276,7 +294,7 @@ bool valid_library(const Library &d)
             return false;
         if (!std::memchr(m.id, 0, sizeof m.id) || !valid_id(m.id) ||
             (m.platform != 0 && m.platform != 1 && m.platform != 2 && m.platform != 4 &&
-             m.platform != 5) ||
+             m.platform != 5 && m.platform != 6 && m.platform != 7) ||
             (m.folders & ~used))
             return false;
         for (int j = 0; j < i; j++)
@@ -321,7 +339,7 @@ bool read_library(const char *text, Library &out)
             std::snprintf(dest.name, sizeof dest.name, "%s", name->valuestring);
             if (!optional_bool(f, "pinned", dest.pinned) ||
                 !optional_int(f, "sort", dest.sort, 3) || !optional_bool(f, "smart", dest.smart) ||
-                !optional_int(f, "rulePlatform", dest.rulePlatform, 5) ||
+                !optional_int(f, "rulePlatform", dest.rulePlatform, 7) ||
                 !optional_int(f, "ruleStatus", dest.ruleStatus, 3) ||
                 !optional_bool(f, "ruleFavorite", dest.ruleFavorite))
             {

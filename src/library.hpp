@@ -48,6 +48,10 @@ char *write_library(const Library &);
 Meta *metadata(Library &, const char *);
 const Meta *metadata(const Library &, const char *);
 int platform(const Game &, const Library &);
+// Platform codes: 1 app, 2 PlayStation 2, 4 PlayStation 4, 5 PlayStation 5, 6 PlayStation 1, 7 Nintendo (3 is not used).
+// True when the game is on the wanted platform (0 = any): by its id for the imported emulator games, by the
+// platform the player chose otherwise.
+bool platform_matches(const Game &, const Library &, int wanted);
 bool delete_folder(Library &, int);
 bool valid_library(const Library &);
 } // namespace estante

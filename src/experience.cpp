@@ -53,8 +53,7 @@ static bool direct_member(const Library &d, const Game &g, int slot)
     const auto &f = d.folders[slot];
     const Meta *m = metadata(d, g.id);
     if (f.smart)
-        return (!f.rulePlatform ||
-                (f.rulePlatform == 2 ? id_starts(g.id, "PS2") : platform(g, d) == f.rulePlatform)) &&
+        return platform_matches(g, d, f.rulePlatform) &&
                (!f.ruleStatus || (m && m->status == f.ruleStatus)) &&
                (!f.ruleFavorite || (m && m->favorite));
     return m && (m->folders & (std::uint32_t(1) << slot));
@@ -94,15 +93,15 @@ int select_games(const Library &d, const Game *games, int count, const Query &q,
         const bool nintendo = id_starts(g.id, "WII") || id_starts(g.id, "WIU") ||
                               id_starts(g.id, "3DS") || id_starts(g.id, "NDS") || id_starts(g.id, "NSW");
         bool match = (q.view == 0 && (q.withApps || p != 1)) || q.view == 7 ||
-                     (q.view == 1 && id_starts(g.id, "PS2")) || (q.view == 12 && id_starts(g.id, "PS1")) ||
-                     (q.view == 13 && nintendo) ||
+                     (q.view == 1 && id_starts(g.id, "PS2")) || (q.view == 12 && (id_starts(g.id, "PS1") || p == 6)) ||
+                     (q.view == 13 && (nintendo || p == 7)) ||
                      (q.view == 2 && p == 4) || (q.view == 3 && p == 5) ||
                      (q.view == 4 && p == 1) || (q.view == 5 && m && m->favorite) ||
                      (q.view == 6 && (!m || !m->folders)) || (q.view == 8 && m && m->status == 1) ||
                      (q.view == 9 && m && m->status == 2) ||
                      (q.view == 10 && m && m->status == 3) || (q.view == 11 && m && m->pinned) ||
                      (q.view >= 100 && collection_contains(d, g, q.view - 100, q.descendants));
-        if (match && (!q.platform || (q.platform == 2 ? id_starts(g.id, "PS2") : p == q.platform)) &&
+        if (match && platform_matches(g, d, q.platform) &&
             (!q.status || (m && m->status == q.status)) && (!q.favorites || (m && m->favorite)) &&
             name_matches(g.name, q.text))
             out[n++] = i;
