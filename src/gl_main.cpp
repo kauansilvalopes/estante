@@ -63,6 +63,7 @@ void run_gl(GlDrawScene draw) noexcept
     const std::uint32_t font_texture = renderer.batch().create_font_texture(font);
     hui::sys::log("[ESTANTE] gl: ready %dx%d", display.width(), display.height());
 
+    bool splash_hidden = false;
     std::uint64_t frames = 0;
     std::int64_t last_report = hui::sys::monotonic_us();
     for (;;)
@@ -74,6 +75,13 @@ void run_gl(GlDrawScene draw) noexcept
         renderer.present(0, display.width(), display.height());
         if (!display.swap())
             fail("DISPLAY SWAP FAILED");
+        if (!splash_hidden)
+        {
+            // The console keeps its launch picture up until the app asks for it to go,
+            // and the runtime holds that request back until the first frame is on screen.
+            hui::sys::hide_splash_screen();
+            splash_hidden = true;
+        }
         frames++;
         const std::int64_t now = hui::sys::monotonic_us();
         if (now - last_report >= 5000000)
