@@ -8,7 +8,8 @@ o menu oficial ou os arquivos dos jogos. Autor: Kauan (@kndofc).
 - L1/R1: Início, Biblioteca, Coleções, Ajustes.
 - Início (catálogo): o jogo em foco ocupa a tela, com a arte larga ao fundo quando existe em
   `/data/estante/covers/wide`. Esquerda/direita move na fileira; cima/baixo troca de fileira. X abre
-  o jogo; para títulos importados de emulador, abre o emulador e você escolhe o título lá. Círculo
+  o jogo; para títulos importados de emulador, inicia o jogo direto (Porpoise, PS5-ECAM, SwanStationPS5,
+  ProsperoEden e PS5SX2); se o ELF loader não responder, abre o emulador e você escolhe o título lá. Círculo
   cancela a animação, R2 abre a página do jogo, Triângulo organiza, Quadrado busca,
   Options abre a Biblioteca.
 - Fileiras do Início: Continuar jogando (somente jogos iniciados pelo Estante; PS2 registra a imagem

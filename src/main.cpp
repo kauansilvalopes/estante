@@ -279,6 +279,13 @@ bool wide_ok = false;
 bool cover_ok = false;
 std::uint64_t verify_at = 0;
 int verify_attempts = 0;
+// Direct start of an emulator game (work kind 30): the emulator opens straight into the game instead of its own
+// library. Porpoise, PS5-ECAM, SwanStationPS5 and ProsperoEden take "--rom <file>" from a small launcher that the
+// ELF loader (port 9021) runs; PS5SX2 reads the image from /data/PCSX2/logs/disc-launch.txt when it starts.
+bool direct_pending = false;
+int direct_mode = 0;    // 1 launcher through the ELF loader, 2 disc-launch.txt for PS5SX2
+int direct_resolve = 0; // 0 the target is the file, 1 it is a PS1 game folder, 2 it is a Switch game folder
+char direct_target[400]{};
 bool launch_pending = false;
 // Launch animation: the cover slides aside, a disc slides out and spins, then the request is sent.
 bool launch_anim_enabled = true;
@@ -849,6 +856,207 @@ bool http_get(const char *path, std::size_t prefix = 0)
     return http_get_to(path, response, sizeof response, response_size, prefix);
 }
 
+// ---- direct start of emulator games -----------------------------------------------------------------
+int connect_local(unsigned port)
+{
+    int s = sceNetSocket("estante", 2, 1, 6);
+    if (s < 0)
+        return -1;
+    const int timeout = 3000000;
+    for (int opt : {0x1105, 0x1106, 0x1109})
+        sceNetSetsockopt(s, 0xffff, opt, &timeout, sizeof timeout);
+    NetAddress address{sizeof(NetAddress), 2, static_cast<std::uint16_t>((port << 8) | (port >> 8)), 0x0100007f, 0, {}};
+    if (sceNetConnect(s, &address, sizeof address) < 0)
+    {
+        sceNetSocketClose(s);
+        return -1;
+    }
+    return s;
+}
+bool send_all(int s, const char *data, std::size_t length)
+{
+    std::size_t off = 0;
+    while (off < length)
+    {
+        const int n = sceNetSend(s, data + off, length - off, 0);
+        if (n <= 0)
+            return false;
+        off += static_cast<std::size_t>(n);
+    }
+    return true;
+}
+// Sends one FTP command (or nothing) and reads the whole reply; returns its code, 0 when the line never came.
+int ftp_reply(int control, const char *command, char *text, std::size_t cap)
+{
+    if (command && !send_all(control, command, std::strlen(command)))
+        return 0;
+    std::size_t used = 0;
+    text[0] = 0;
+    for (int guard = 0; guard < 40 && used + 1 < cap; guard++)
+    {
+        const int n = sceNetRecv(control, text + used, cap - 1 - used, 0);
+        if (n <= 0)
+            return 0;
+        used += static_cast<std::size_t>(n);
+        text[used] = 0;
+        // The reply is complete at a line "123 ..." (a multi-line reply starts with "123-").
+        const char *line = text;
+        while (*line)
+        {
+            const char *eol = std::strchr(line, '\n');
+            if (!eol)
+                break;
+            if (std::isdigit(static_cast<unsigned char>(line[0])) && std::isdigit(static_cast<unsigned char>(line[1])) &&
+                std::isdigit(static_cast<unsigned char>(line[2])) && line[3] == ' ')
+                return std::atoi(line);
+            line = eol + 1;
+        }
+    }
+    return 0;
+}
+// Writes a small text file through Elf Arsenal's FTP server on this console (port 2121, anonymous).
+bool ftp_store_text(const char *remote, const char *content)
+{
+    const int control = connect_local(2121);
+    if (control < 0)
+        return false;
+    char text[512];
+    bool ok = ftp_reply(control, nullptr, text, sizeof text) == 220;
+    if (ok)
+    {
+        int code = ftp_reply(control, "USER anonymous\r\n", text, sizeof text);
+        if (code == 331)
+            code = ftp_reply(control, "PASS x\r\n", text, sizeof text);
+        ok = code == 230;
+    }
+    ok = ok && ftp_reply(control, "TYPE I\r\n", text, sizeof text) == 200;
+    unsigned h[6]{};
+    ok = ok && ftp_reply(control, "PASV\r\n", text, sizeof text) == 227;
+    const char *open = ok ? std::strchr(text, '(') : nullptr;
+    ok = ok && open && std::sscanf(open + 1, "%u,%u,%u,%u,%u,%u", &h[0], &h[1], &h[2], &h[3], &h[4], &h[5]) == 6;
+    if (ok)
+    {
+        const int data = connect_local((h[4] << 8) | h[5]);
+        char command[600];
+        std::snprintf(command, sizeof command, "STOR %s\r\n", remote);
+        const int code = data < 0 ? 0 : ftp_reply(control, command, text, sizeof text);
+        ok = data >= 0 && (code == 150 || code == 125);
+        if (ok)
+            ok = send_all(data, content, std::strlen(content));
+        if (data >= 0)
+            sceNetSocketClose(data);
+        ok = ok && ftp_reply(control, nullptr, text, sizeof text) == 226;
+    }
+    ftp_reply(control, "QUIT\r\n", text, sizeof text);
+    sceNetSocketClose(control);
+    return ok;
+}
+// The libc here has no memmem.
+char *find_bytes(char *hay, std::size_t hay_length, const char *needle, std::size_t needle_length)
+{
+    if (!needle_length || hay_length < needle_length)
+        return nullptr;
+    for (std::size_t i = 0; i + needle_length <= hay_length; i++)
+        if (hay[i] == needle[0] && !std::memcmp(hay + i, needle, needle_length))
+            return hay + i;
+    return nullptr;
+}
+bool name_has_extension(const char *name, const char *const *extensions, int extension_count)
+{
+    const std::size_t length = std::strlen(name);
+    for (int i = 0; i < extension_count; i++)
+    {
+        const std::size_t suffix = std::strlen(extensions[i]);
+        if (length > suffix && !strcasecmp(name + length - suffix, extensions[i]))
+            return true;
+    }
+    return false;
+}
+// The disc image to hand to a frontend: a PS1 folder holds a .cue (or .chd, .m3u...) and the tracks; a Switch folder
+// holds the base .nsp/.xci and its update, and the base is the biggest.
+bool resolve_game_file(const char *folder, int kind, char *out, std::size_t cap)
+{
+    static const char *const ps1_order[] = {".cue", ".chd", ".m3u", ".pbp", ".iso", ".img", ".bin"};
+    static const char *const switch_formats[] = {".nsp", ".xci", ".nsz", ".xcz"};
+    char list[sizeof request_path];
+    std::snprintf(list, sizeof list, "/api/fs/list?path=%s", folder);
+    char encoded[sizeof request_path]{};
+    if (!estante::encode_fs_request(list, encoded, sizeof encoded) || !http_get(encoded))
+        return false;
+    cJSON *root = cJSON_Parse(response);
+    const cJSON *entries = root ? cJSON_GetObjectItemCaseSensitive(root, "entries") : nullptr;
+    char best[200]{};
+    int best_rank = 1000;
+    double best_size = -1;
+    const cJSON *entry = nullptr;
+    cJSON_ArrayForEach(entry, entries)
+    {
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(entry, "name");
+        const cJSON *dir = cJSON_GetObjectItemCaseSensitive(entry, "dir");
+        const cJSON *size = cJSON_GetObjectItemCaseSensitive(entry, "size");
+        if (!cJSON_IsString(name) || !name->valuestring || cJSON_IsTrue(dir) ||
+            std::strlen(name->valuestring) >= sizeof best)
+            continue;
+        if (kind == 1)
+        {
+            int rank = 1000;
+            for (int i = 0; i < 7; i++)
+                if (name_has_extension(name->valuestring, &ps1_order[i], 1))
+                    rank = i;
+            if (rank < best_rank || (rank == best_rank && rank < 1000 && std::strcmp(name->valuestring, best) < 0))
+            {
+                best_rank = rank;
+                std::snprintf(best, sizeof best, "%s", name->valuestring);
+            }
+        }
+        else if (name_has_extension(name->valuestring, switch_formats, 4))
+        {
+            const double bytes = cJSON_IsNumber(size) ? size->valuedouble : 0;
+            if (bytes > best_size)
+            {
+                best_size = bytes;
+                std::snprintf(best, sizeof best, "%s", name->valuestring);
+            }
+        }
+    }
+    cJSON_Delete(root);
+    if (!best[0] || (kind == 1 && best_rank == 1000))
+        return false;
+    return estante::join_import_path(folder, best, out, cap);
+}
+// Runs in the worker: puts the game where its frontend reads it and, for the launcher route, sends the launcher.
+bool direct_launch_job()
+{
+    char target[400];
+    std::snprintf(target, sizeof target, "%s", direct_target);
+    if (direct_resolve && !resolve_game_file(direct_target, direct_resolve, target, sizeof target))
+        return false;
+    if (target[0] != '/')
+        return false;
+    if (direct_mode == 2)
+        return ftp_store_text("/data/PCSX2/logs/disc-launch.txt", target);
+    // The launcher is the one Porpoise ships for its home-screen tiles; it starts any of these frontends by title id.
+    constexpr char launcher[] = "/api/fs/download?path=/data/homebrew/PPSA99764/assets/forwarder/home-launcher.elf";
+    if (!http_get(launcher) || response_size < 90000 || response_size > 140000)
+        return false;
+    static const char marker[] = "PORPOISE-HOME-LAUNCH-V1";
+    static const char original[] = "PPSA99764";
+    char *at = find_bytes(response, response_size, marker, sizeof marker - 1);
+    char *app = find_bytes(response, response_size, original, sizeof original - 1);
+    if (!at || !app || std::strlen(launch_id) != 9 || std::strlen(target) + 1 > 2040 ||
+        static_cast<std::size_t>(at - response) + 2047 > response_size)
+        return false;
+    std::memcpy(app, launch_id, 9);
+    std::memset(at, 0, 2047);
+    std::memcpy(at, target, std::strlen(target));
+    const int loader = connect_local(9021);
+    if (loader < 0)
+        return false;
+    const bool sent = send_all(loader, response, response_size);
+    sceNetSocketClose(loader);
+    return sent;
+}
+
 void *worker(void *)
 {
     if (work_kind == 3)
@@ -900,6 +1108,8 @@ void *worker(void *)
         }
 #endif
     }
+    else if (work_kind == 30)
+        response_ok = direct_launch_job();
     else if (work_kind == 8 || work_kind == 20)
         response_ok = http_get(request_path, 700000);
 #ifdef ESTANTE_GL
@@ -2244,9 +2454,35 @@ void poll_work()
                 if (storage_ok && persist(nextdb))
                     rebuild();
             }
+            if (direct_pending)
+            {
+                next = 30;
+                std::snprintf(path, sizeof path, "/api/state");
+                msg("Abrindo o jogo direto…");
+            }
+            else
+            {
+                next = 2;
+                std::snprintf(path, sizeof path, "/launch?titleId=%s", launch_id);
+                msg("Abrindo o jogo…");
+            }
+        }
+    }
+    else if (work_kind == 30)
+    {
+        direct_pending = false;
+        if (response_ok && direct_mode == 1)
+        {
+            verify_attempts = 0;
+            verify_at = sceKernelGetProcessTime() + 1500000;
+            msg("Pedido enviado. Aguardando o jogo abrir…");
+        }
+        else
+        {
+            // PS5SX2 (disc-launch.txt written) and any route that failed: open the frontend the usual way.
             next = 2;
             std::snprintf(path, sizeof path, "/launch?titleId=%s", launch_id);
-            msg("Abrindo o jogo…");
+            msg(response_ok ? "Abrindo o PS5SX2 com o jogo…" : "Início direto indisponível. Abrindo o emulador.");
         }
     }
     else if (work_kind == 2)
@@ -2303,13 +2539,36 @@ void queue_ps2_launch()
     msg("Verificando o console…");
     start_request(4, "/api/state");
 }
+// Decides how an imported game is started: straight into the game for the frontends that take it, otherwise
+// (or when that fails) by opening the frontend.
+void prepare_direct_launch(int idx)
+{
+    static const char *const switch_formats[] = {".nsp", ".xci", ".nsz", ".xcz"};
+    const char *app = emulator_app[idx];
+    direct_pending = false;
+    direct_mode = 1;
+    direct_resolve = 0;
+    if (std::strcmp(app, "PPSA99764") && std::strcmp(app, "PPSA99360") && std::strcmp(app, "PPSA98510") &&
+        std::strcmp(app, "PPSA99008"))
+        return;
+    if (emulator_path[idx][0] != '/' || std::strlen(emulator_path[idx]) >= sizeof direct_target)
+        return;
+    if (!std::strcmp(app, "PPSA98510"))
+        direct_resolve = 1; // a PS1 game is a folder
+    else if (!std::strcmp(app, "PPSA99008") && !name_has_extension(emulator_path[idx], switch_formats, 4))
+        direct_resolve = 2; // a Switch game kept in its own folder
+    std::snprintf(direct_target, sizeof direct_target, "%s", emulator_path[idx]);
+    direct_pending = true;
+}
 void start_launch(int idx)
 {
     if (idx < 0 || idx >= count || launch_pending)
         return;
     std::snprintf(launch_game, 10, "%s", games[idx].id);
+    direct_pending = false;
     if (emulator_app[idx][0])
     {
+        prepare_direct_launch(idx);
         // Elf Arsenal launches PS5 titles by id only.  Until a per-game forwarder exists for this
         // frontend, this opens the right library and preserves the selected virtual game as the
         // player's Continue entry.
@@ -2322,6 +2581,11 @@ void start_launch(int idx)
     }
     if (is_ps2_id(games[idx].id) && ps2_file[idx][0])
     {
+        direct_mode = 2;
+        direct_resolve = 0;
+        direct_pending = std::snprintf(direct_target, sizeof direct_target, "%s/%s",
+                                       ps2_dir_of[idx] ? ps2_dir_of[idx] : ps2_roots[0], ps2_file[idx]) <
+                         static_cast<int>(sizeof direct_target);
         queue_ps2_launch();
         return;
     }
@@ -3581,7 +3845,7 @@ void breadcrumb(char *out, std::size_t cap, int slot)
 void draw_top(Canvas &c)
 {
     text(c, 100, 30, "estante", 40, white, 260);
-    text(c, 285, 44, "0.5.7", 22, muted, 90);
+    text(c, 285, 44, "0.5.8", 22, muted, 90);
     const char *tabs[] = {"Início", "Biblioteca", "Coleções", "Ajustes"};
     unsigned widths[4], total = 0;
     for (int i = 0; i < 4; i++)
